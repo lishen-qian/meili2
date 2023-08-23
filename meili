@@ -1,0 +1,4399 @@
+#2022-06-07####
+load(file="c:/d/r/meili2/meili2.RData")#加载环境中的变量 
+#  pch=19,cex.main=2,cex.lab=1.5,cex.axis=1.5,ylab="",xlab=""
+#(  x =   y=# x y 左上角Position  legend = c("Plot level", ),lty = c(1, 1,1),   col = c(lc1,lc2,lc3),  lwd = 3,bty="n")   #bty="n"无边框
+#path<-paste("C:/D/r/meili2/jpg/分辨率-beta fds",Sys.Date(),".pdf",sep="_")
+#pdf(path,width=11.69*1.1,height=8.27)
+
+#调用包####
+install.packages("microeco")
+install.packages("ape")
+install.packages("V.PhyloMaker")
+
+install.packages("V.PhyloMaker2")
+install.packages("devtools")
+devtools::install_github("jinyizju/V.PhyloMaker")
+devtools::install_github("jinyizju/V.PhyloMaker2")
+install.packages("plantlist", repos="http://R-Forge.R-project.org")#安装TPL包
+install.packages("picante")#安装picante包
+install.packages("rJava")#加载glmulti前要安rJava包
+install.packages("glmulti")#加载glmulti前要安rJava包
+install.packages("MuMIn")
+install.packages("car")
+install.packages("betapart")
+install.packages("simba")
+library("simba")
+library(V.PhyloMaker)
+library(V.PhyloMaker2)
+library(picante)
+library(rJava)
+library(glmulti)
+      
+#costum functions####
+rp<-function(x,y,z,term=1){
+  if (class(x)=="dist") {x<-dtc(x)  }
+  if (class(y)=="dist") {y<-dtc(y)  }
+  if (class(z)=="dist") {z<-dtc(z)  }
+  
+  if (term==1) {fit<-lm(z~x+y)}
+  if (term==2) {fit<-lm(z~x+I(x^2)+y+I(y^2))}
+  
+  
+  f<-summary(fit)[10][[1]]
+  p<-pf(f[1],f[2],f[3],lower.tail=F)#用f检验值计算p值
+  r2<-round(summary(fit)[[9]],3)
+  
+  if (p <= 0.001) {
+    sig.mark <- "***"}
+  if (p <= 0.01 & p > 0.001) {
+    sig.mark <- "**"}
+  if (p <= 0.05 & p > 0.01) {
+    sig.mark<- "*"}
+  if (p > 0.05) {
+    sig.mark <- ""}
+  return(paste(r2,sig.mark, sep = ""))}#获取lm的r方p
+
+columtomatrix<-function(colum){#
+  r <- unique(colum[, 2])##第二列作为行
+  c <- unique(colum[, 1])#列
+  data <- as.data.frame(array(dim = c(length(r), length(c))))
+  row.names(data) <- r
+  colnames(data) <- c
+  if (dim(colum)[2]==3) {#三列数据情况，0-n矩阵
+    for (i in 1:length(colum[,3])) {data[match(colum[i,2],r),match(colum[i,1],c)] <- colum[i,3]}
+  }
+  if (dim(colum)[2]==2) {#二列数据情况，0-1矩阵
+    for (i in 1:length(colum[,2])) {data[match(colum[i,2],r),match(colum[i,1],c)] <- 1}
+  }
+  data[is.na(data)]<-0#NA置为0
+  # for (i in 1:length(data[1,])) {
+  #  for (j in 1:length(data[,1])) {
+  #    if (is.na(data[j,i])) {data[j,i]<-0
+  #   }
+  #   }
+  # }
+  remove(r,c)
+  return(data)
+}#列转矩阵
+meanmaxmin<-function(twocolums){
+uniquevalue<-data.frame(unique(twocolums[,1]))
+colnames(uniquevalue)[1]<-names(twocolums)[1]
+for (i in 1:dim(uniquevalue)[1]) {
+  uniquevalue[i,2]<-mean(twocolums[twocolums[,1]==uniquevalue[i,1],2])
+  uniquevalue[i,3]<-max (twocolums[twocolums[,1]==uniquevalue[i,1],2])
+  uniquevalue[i,4]<-min (twocolums[twocolums[,1]==uniquevalue[i,1],2])
+}
+return(uniquevalue)
+}#两列分组提取数值的均值和极值，第二列为数字
+speciesrichness<-function(matrix01){
+  
+data<-data.frame(rownames(matrix01))
+  for (i in 1:length(rownames(matrix01))) {
+    data[i,2]<-sum(matrix01[i,])
+  }
+return(data)
+}#01矩阵算物种多样性
+sorensen1 <- function(m01) {
+  data <- NULL
+  l <- length(rownames(m01))
+  for (i in 1:(l - 1)) {
+    for (j in (i + 1):l) {
+      data <- rbind(data, data.frame(sor=round(2 * sum(m01[i, ] * m01[j, ]) / (sum(m01[i, ]) + sum(m01[j, ])) , 3),
+                                    fst= rownames(m01)[i],
+                                    snd= rownames(m01)[j]))
+    }
+  }
+  return(data)
+}#2022-06-08 用0-1矩阵算样方间sorensen beta多样性，一行是一个样方
+sorensen2 <- function(m01) {
+l<-length(rownames(m01))
+data<-NULL
+namelist<-NULL
+temp1<-m01
+for (i in 1:(l - 1)) {
+
+  temp2 <-  rbind(temp1[2:l,], temp1[1,])#滚动
+  temp3 <- m01 * temp2#矩阵相乘算共有种
+  rownames(temp3) <- paste(rownames(m01), rownames(temp2))#行重命名
+  namelist <-rbind(namelist,data.frame(fst=rownames(m01),scd=rownames(temp2)))
+  data <-rbind(data, data.frame(sor = round(2 * rowSums(temp3) / (rowSums(temp2) + rowSums(m01)), 3)))#算sorensen算法
+  temp1<-temp2#迭代
+}
+data<-cbind(data,namelist)
+data<-data[1:(length(row.names(data))/2),]#保留结果的前半即可，后半为完整矩阵的互补上/下三角矩阵，重复数据
+
+temp<-data[data[,2]>data[,3],3]
+data[data[,2]>data[,3],3]<-data[data[,2]>data[,3],2]
+data[data[,2]==data[,3],2]<-temp
+remove(temp,temp1,temp2,temp3)
+data<-data[order(data[,3]),]#次级排序列
+data<-data[order(data[,2]),]#主级排序列
+return(data)
+}#2022-06-08 用0-1矩阵算样方间sorensen beta多样性，一行是一个样方
+sorensen3 <- function(m01) {
+  n<-nrow(m01)#群落数量，重要参数
+  dulpm0<-dulpm1<-data.frame(matrix(rep(as.vector(t(m01)),times=n-1),ncol=ncol(m01),nrow=n*(n-1),byrow=T),
+                             lable=rep(rownames(m01),times=n-1),
+                             oo=1:(n*(n-1))
+  )#原始01矩阵以matrix类化为向量后重复n-1次再按行填充成matrix及数据框，制作原始扩充矩阵
+  #同时加上扩增后的行标签，也就是样方号，再加上最后一列1：n*(n-1)的序列值
+  x<-dulpm1[,ncol(dulpm1),drop=F]#只取出最后一列原始顺序值，进行修改
+  
+  rollup  <-data.frame(low=(x[x%%n==0,]-x[x%%n==0,]/n+1),high=(x[x%%n==0,]))#提前区间
+  rolldown<-data.frame(low=(x[x%%n==0,]-n+1),high=(x[x%%n==0,]-x[x%%n==0,]/n))#延后区间
+  
+  up  <-x>=rollup  [ceiling(x/n)[,1],1]&x<=rollup  [ceiling(x/n)[,1],2]#提前元素索引
+  down<-x>=rolldown[ceiling(x/n)[,1],1]&x<=rolldown[ceiling(x/n)[,1],2]#延后元素索引
+  
+  orderup  <-data.frame(low=(x[x%%n==0,]-n+1),high=(x[x%%n==0,]+x[x%%n==0,]/n-n))#提前新顺序
+  orderdown<-data.frame(low=(x[x%%n==0,]+x[x%%n==0,]/n-n+1),high=(x[x%%n==0,]))#延后新顺序
+  
+  x[up,1]  <-(orderup  [,1][ceiling(x/n)[,1]]+x-rollup  [ceiling(x/n)[,1],1])[up]
+  x[down,1]<-(orderdown[,1][ceiling(x/n)[,1]]+x-rolldown[ceiling(x/n)[,1],1])[down]
+  dulpm0<-data.frame(dulpm0,x)
+  dulpm0[order(dulpm0[,ncol(dulpm0)]),1:ncol(m01)]*dulpm1[,1:ncol(m01)]
+  data<-data.frame(sor = round(2 * rowSums(dulpm0[order(dulpm0[, ncol(dulpm0)]), 1:ncol(m01)] *
+                                             dulpm1[, 1:ncol(m01)]) / (rowSums(dulpm0[order(dulpm0[, ncol(dulpm0)]), 1:ncol(m01)]) + rowSums(dulpm1[, 1:ncol(m01)])), 3),
+                   fst=dulpm0[order(dulpm0[,ncol(dulpm0)]),(ncol(m01)+1)],
+                   snd=dulpm1[,(ncol(m01)+1)]
+  )
+  data<-data[1:(nrow(data)/2),]#保留结果的前半即可，后半为完整矩阵的互补上/下三角矩阵，为重复数据
+  
+  temp<-data[data[,2]>data[,3],3]
+  data[data[,2]>data[,3],3]<-data[data[,2]>data[,3],2]
+  data[data[,2]==data[,3],2]<-temp
+  #交换标签列，保证第二列标签始终大于第一列标签，方便最后排序输出
+  data<-data[order(data[,3]),]#次级排序列
+  data<-data[order(data[,2]),]#主级排序列
+  return(data)
+}#2022-06-10 用0-1矩阵算样方间sorensen beta多样性，一行是一个样方
+disttocolum<-function(distobj){
+  return(distobj[1:(dim(distobj)[[1]]*(dim(distobj)[[1]]-1)/2)])
+}#距离矩阵转列
+dtc<-function(distobj){
+  return(distobj[1:(dim(distobj)[[1]]*(dim(distobj)[[1]]-1)/2)])
+}#距离矩阵转列
+
+plot.trendl.pr <- function(x, y, lcol="steelblue", lwidth=2.5,term=1,position="rt",type="pr",rpoffset=1.1){  
+ # plot(x,y)
+    
+  if (position=="rt") {  
+    texty<-rpoffset*max(y)
+    textx<-max(x)- 0.9*(max(x)-min(x)) }
+  if (position=="rb") {  
+    texty<-min(y)+0.1*(max(y)-min(y))
+    textx<-max(x)- 0.5*(max(x)-min(x)) }
+  if (position=="lt") {  
+    texty<-max(y)-0.025*(max(y)-min(y))
+    textx<-min(x)+0.02*(max(x)-min(x)) }
+  if (position=="lb") {  
+    texty<-min(y)+0.025*(max(y)-min(y))
+    textx<-min(x)+0.02*(max(x)-min(x))  }
+  
+  if(class(x)=="dist"){x<-dtc(x)}
+  if(class(y)=="dist"){
+    y<-dtc(y)
+    texty<-rpoffset*max(y)
+   # texty<-1.2
+    
+  }
+
+  
+  if (term==1) {fit<-lm(y~x)  }
+  if (term==2) {fit<-lm(y~x+I(x^2))  }
+  if (term==3) {fit<-lm(y~x+I(x^2)+I(x^3))  }
+  if (term=="e") {fit<-lm(y~exp(-x))  }
+  
+  f<-summary(fit)[10][[1]]
+  p<-pf(f[1],f[2],f[3],lower.tail=F)#用f检验值计算p值
+  if (type=="pr") {  text(textx,texty+0.02*(max(y)-min(y)),expression(R^2),cex=1.5,adj=c(0,1))}
+  
+  if (p<0.05) #显著才画线
+  {
+    pred <- predict(fit)
+    ix <- sort(x, index.return=T)$ix
+    lines(x[ix], pred[ix], col=lcol, lwd=lwidth)
+    if (type=="pr") { 
+    if(p<0.05&&p>=0.01){     text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.05",sep=" "),cex=1.5,adj=c(0,1))}
+    if(p<0.01&&p>=0.001){    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.01",sep=" "),cex=1.5,adj=c(0,1))}
+    if(p<0.001)         {    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.001",sep=" "),cex=1.5,adj=c(0,1))}
+    }
+  }#分情况标注p
+  if (p>=0.05) 
+  {
+    if (type=="pr") 
+    {
+    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P=",round(p,3),sep=" "),cex=1.5,adj=c(0,1))
+    }
+  }
+  
+}#添加趋势线和p值r方
+plot.gam<-function(x,y,lcol="black",lwidth=1){
+  lines(x[order(x)],fitted(mgcv::gam(y~s(x[order(x)])))[order(x)],col=lcol,lwd=lwidth)#用gam画
+  
+  
+}
+cor.p<-function(data){
+  result3<-data.frame(x="",y="",p="")
+  for(i in 1:(dim(data)[2]-1))#遍历所有变量
+  {
+    for (j in (i+1):dim(data)[2])
+    {
+      if(class(data[,i])=="numeric"&&class(data[,j])=="numeric")
+      {#分三种情况处理#数值-数值
+        p<-cor.test(data[,i],data[,j],method = c("pearson"))$p.value
+        r<-cor.test(data[,i],data[,j],method = c("pearson"))$estimate
+        result3 <- rbind(result3, cbind(x=names(data)[i],y=names(data)[j],p=p))
+        
+        #   result3 <- rbind(result3, cbind(paste(names(data)[i],names(data)[j],sep="-"),r*r,p))
+      }
+      if(class(data[,i])=="numeric"&&class(data[,j])=="factor")
+      {#数值-分类
+        aovp<-summary(aov(data[,i]~data[,j]))[[1]][1,5]#提取p
+        #    result3 <- rbind(result3, cbind(paste(names(data)[i],names(data)[j],sep="-"),"Null",aovp))
+        result3 <- rbind(result3, cbind(x=names(data)[i],y=names(data)[j],p=aovp))
+      }
+      if(class(data[,i])=="factor"&&class(data[,j])=="factor")
+      {#分类-分类
+        chisq.p<-chisq.test(data[,i],data[,j])$p.value
+        #  result3 <- rbind(result3, cbind(paste(names(data)[i],names(data)[j],sep="-"),"NULL",chisq.p))
+        result3 <- rbind(result3, cbind(x=names(data)[i],y=names(data)[j],p=chisq.p))
+      }
+    }
+  }
+  result3<-result3[-1,]
+  return(result3)
+}#计算分类-数值混合数据的两两相关性，输出三列
+extract.a.fd<-function(alpha.fd.plot.list){
+  alpha.fd.plot <-
+    data.frame(
+      alpha.fd.plot.list[[1]],
+      #    alpha.fd.plot.list[[2]],
+      alpha.fd.plot.list[[3]],
+      alpha.fd.plot.list[[5]],
+      alpha.fd.plot.list[[6]],
+      alpha.fd.plot.list[[7]]
+    )
+  names(alpha.fd.plot)<-names(alpha.fd.plot.list)[c(1,3,5,6,7)]
+  return(alpha.fd.plot)
+}#输入功能多样性dbfd结果的list,提出nbsp,fric,feve,fdiv,fdis矩阵
+verticelist<-function(list){
+  data<-NULL
+  l1<-length(list)
+  for (i in 1:l1) {
+    names(list)[i]
+    l2<-length(list[[i]])
+    data<-rbind(data,data.frame(vertice=names(list)[i],species=list[[i]]))
+  }
+  return(data)
+}#提取列表的顶点汇成两列，群落-顶点物种，输入列表alpha_fd_vege$details$asb_vert_nm
+lessfillmore<-function(less,more){#
+  data <- data.frame(more,less=NA)
+  for (i in 1:length(less)) {
+    data[match(names(less)[i],names(more)),2]<-less[i]
+  }
+  
+  return(data)
+}#用少列去填充到多列，空余为NA,输入两个向量
+pc.vertice<-function(m01,coord,k){
+  more<-colSums(m01)
+  data <- as.data.frame(array(dim = c(length(more), k)))
+  data[,1]<-more
+  rownames(data)<-names(more)
+  
+  for (i in 2:k) {
+    
+    temp.exclude.row<-which(rownames(m01)%in%names(rowSums(m01)[rowSums(m01)<=k]))#需要排除的样方排序索引
+    temp.exclude.col<-which(colSums(m01[-temp.exclude.row,])==0)#需要排除的物种排序索引
+    
+    alpha_fd_vege.temp <- mFD::alpha.fd.multidim(
+      sp_faxes_coord   = coord[ , 1:i,drop=F],  asb_sp_w= as.matrix(m01[-c(8),]),  ind_vect = c("fric"),
+      scaling = TRUE,  check_input = TRUE,  details_returned = TRUE)
+    less<-rowSums(columtomatrix(verticelist(alpha_fd_vege.temp$details$asb_vert_nm)))
+    
+    for (j in 1:length(less))
+    {
+      data[match(names(less)[j], names(more)), i] <- less[j]
+    }
+  }
+  
+  return(data)
+}#根据输入的矩阵和最大pc轴值，依次提出pc2-pck下的顶点物种
+cor.sig <- function(test) {
+  res.cor = cor(test)
+  res.sig = res.cor
+  res.sig[abs(res.sig) > 0] = NA
+  nx = dim(test)[2]
+  for (i in 1:nx) {
+    for (j in 1:nx) {
+      res.cor1 = as.numeric(cor.test(test[, i], test[, j])$est)
+      res.sig1 = as.numeric(cor.test(test[, i], test[, j])$p.value)
+      if (res.sig1 <= 0.001) {
+        sig.mark = "***"}
+      if (res.sig1 <= 0.01 & res.sig1 > 0.001) {
+        sig.mark = "**"}
+      if (res.sig1 <= 0.05 & res.sig1 > 0.01) {
+        sig.mark = "*"}
+      if (res.sig1 > 0.05) {
+        sig.mark = ""}
+      if (res.cor1 > 0) {
+        res.sig[i, j] = paste(" ", as.character(round(res.cor1, 2)),
+                              sig.mark, sep = "")
+      } else {
+        res.sig[i, j] = paste(as.character(round(res.cor1, 2)), sig.mark,
+                              sep = "")
+      }
+    }
+  }
+  as.data.frame(res.sig)
+}
+
+ses.plot<-function(x,y, yname="Value",mainname,term=2,lcol="grey",position="rt"){
+  plot(x[,1],y[,6],xlab = "Elevation (m)",ylab =yname,main=mainname,ylim=c(min(y[,6]),1.4*max(y[,6])),cex.main=3,cex.lab=2.5,cex.axis=1.5 )
+  
+  #title(main = list("群落ses.alpha.mfd", cex = 1.5,col = "black", font = 1))
+  segments(min(x[,1]),0,max(x[,1]),0,lty=2)
+  points(x[y[,6]>=0,1],y[y[,6]>=0,6],pch=19,cex=2,col="pink")
+  points(x[y[,6]<=0,1],y[y[,6]<=0,6],pch=19,cex=2,col="steelblue")
+  
+  points(x[y[,7]>=0.95,1],y[y[,7]>=0.95,6],cex=2,pch=19,col="red")
+  points(x[y[,7]<=0.05,1],y[y[,7]<=0.05,6],cex=2,pch=19,col="blue")
+  
+  x<-x[,1]
+  y<-y[,6]
+ # lcol="grey" 
+  lwidth=2
+ # term=2
+ # position="rt"
+  # plot(x,y)
+  if (position=="rt") {  
+    texty<-1.4*max(y)#-0.005*(max(y)-min(y))
+    textx<-max(x)- 0.6*(max(x)-min(x)) }
+  if (position=="rb") {  
+    texty<-min(y)+0.025*(max(y)-min(y))
+    textx<-max(x)- 0.28*(max(x)-min(x)) }
+  if (position=="lt") {  
+    texty<-max(y)-0.025*(max(y)-min(y))
+    textx<-min(x)+0.02*(max(x)-min(x)) }
+  if (position=="lb") {  
+    texty<-min(y)+0.025*(max(y)-min(y))
+    textx<-min(x)+0.02*(max(x)-min(x))  }
+  
+  if (term==1) {fit<-lm(y~x)  }
+  if (term==2) {fit<-lm(y~x+I(x^2))  }
+  if (term==3) {fit<-lm(y~x+I(x^2)+I(x^3))  }
+  if (term=="e") {fit<-lm(y~exp(-x))  }
+  
+  f<-summary(fit)[10][[1]]
+  p<-pf(f[1],f[2],f[3],lower.tail=F)#用f检验值计算p值
+   text(textx,texty+0.02*(max(y)-min(y)),expression(R^2),cex=2,adj=c(0,1),col="black")
+  
+  if (p<0.05) #显著才画线
+  {
+    pred <- predict(fit)
+    ix <- sort(x, index.return=T)$ix
+    lines(x[ix], pred[ix], col=lcol, lwd=lwidth)#添加趋势线
+    if(p<0.05&&p>=0.01){     text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.05",sep=" "),cex=2,adj=c(0,1),col="black")}
+    if(p<0.01&&p>=0.001){    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.01",sep=" "),cex=2,adj=c(0,1),col="black")}
+    if(p<0.001)         {    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.001",sep=" "),cex=2,adj=c(0,1),col="black")}
+  }#分情况标注p
+   
+  if (p>=0.05) #不显著只标p和r2
+  {
+    fit<-lm(y~x) 
+    f<-summary(fit)[10][[1]]
+    p<-pf(f[1],f[2],f[3],lower.tail=F)#用f检验值计算p值
+     text(textx,texty+0.02*(max(y)-min(y)),expression(R^2),cex=2,adj=c(0,1),col="black")
+
+    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P>0.05",sep=" "),cex=2,adj=c(0,1),col="black")
+   
+  }
+  
+  
+  
+}#专门画ses标准净效应的函数，y输入ses.函数输出的原始8列数据框即可
+ses.plot.g<-function(x,y, yname="Value",mainname,term=2,lcol="grey",position="rt"){
+  y[is.na(y[,6]),6]<-mean(na.omit(y[,6]))
+  y[is.na(y[,7]),7]<-mean(na.omit(y[,7]))
+  
+  plot(x,y[,6],xlab = "Elevation (m)",ylab =yname,main=mainname,ylim=c(min(y[,6]),1.4*max(y[,6])),cex.main=3,cex.lab=2.5,cex.axis=1.5 )
+  
+  #title(main = list("群落ses.alpha.mfd", cex = 1.5,col = "black", font = 1))
+  segments(min(x),0,max(x),0,lty=2)
+  points(x[y[,6]>=0],y[y[,6]>=0,6],pch=19,cex=2,col="pink")
+  points(x[y[,6]<=0],y[y[,6]<=0,6],pch=19,cex=2,col="steelblue")
+  
+  points(x[y[,7]>=0.95],y[y[,7]>=0.95,6],cex=2,pch=19,col="red")
+  points(x[y[,7]<=0.05],y[y[,7]<=0.05,6],cex=2,pch=19,col="blue")
+  
+  x<-x
+  y<-y[,6]
+  # lcol="grey" 
+  lwidth=2
+  # term=2
+  # position="rt"
+  # plot(x,y)
+  if (position=="rt") {  
+    texty<-1.4*max(y)#-0.005*(max(y)-min(y))
+    textx<-max(x)- 0.6*(max(x)-min(x)) }
+  if (position=="rb") {  
+    texty<-min(y)+0.025*(max(y)-min(y))
+    textx<-max(x)- 0.28*(max(x)-min(x)) }
+  if (position=="lt") {  
+    texty<-max(y)-0.025*(max(y)-min(y))
+    textx<-min(x)+0.02*(max(x)-min(x)) }
+  if (position=="lb") {  
+    texty<-min(y)+0.025*(max(y)-min(y))
+    textx<-min(x)+0.02*(max(x)-min(x))  }
+  
+  if (term==1) {fit<-lm(y~x)  }
+  if (term==2) {fit<-lm(y~x+I(x^2))  }
+  if (term==3) {fit<-lm(y~x+I(x^2)+I(x^3))  }
+  if (term=="e") {fit<-lm(y~exp(-x))  }
+  
+  f<-summary(fit)[10][[1]]
+  p<-pf(f[1],f[2],f[3],lower.tail=F)#用f检验值计算p值
+  text(textx,texty+0.02*(max(y)-min(y)),expression(R^2),cex=2,adj=c(0,1),col="black")
+  
+  if (p<0.05) #显著才画线
+  {
+    pred <- predict(fit)
+    ix <- sort(x, index.return=T)$ix
+    lines(x[ix], pred[ix], col=lcol, lwd=lwidth)#添加趋势线
+    if(p<0.05&&p>=0.01){     text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.05",sep=" "),cex=2,adj=c(0,1),col="black")}
+    if(p<0.01&&p>=0.001){    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.01",sep=" "),cex=2,adj=c(0,1),col="black")}
+    if(p<0.001)         {    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.001",sep=" "),cex=2,adj=c(0,1),col="black")}
+  }#分情况标注p
+  
+  if (p>=0.05) #不显著只标p和r2
+  {
+    fit<-lm(y~x) 
+    f<-summary(fit)[10][[1]]
+    p<-pf(f[1],f[2],f[3],lower.tail=F)#用f检验值计算p值
+    text(textx,texty+0.02*(max(y)-min(y)),expression(R^2),cex=2,adj=c(0,1),col="black")
+    
+    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P>0.05",sep=" "),cex=2,adj=c(0,1),col="black")
+    
+  }
+  
+  
+  
+}#专门画ses标准净效应的函数，y输入ses.函数输出的原始8列数据框即可
+ses.beta.plot<-function(x,y,yname="",mainname="",term=2,lcol="black" ,lwidth=2, position="rt"){
+  plot(x,y,xlab = "Elevation Distance(m)",ylab =yname,main=mainname ,cex.main=3,cex.lab=2.5,cex.axis=1.5,ylim=c(min(y),max(y)*1.3))
+  if (class(x)=="dist") {x<-dtc(x)}
+  if (class(y)=="dist") {y<-dtc(y)}
+  #title(main = list("群落ses.alpha.mfd", cex = 1.5,col = "black", font = 1))
+  segments(min(x),0,max(x),0,lty=2)
+  points(x[y>=0],y[y>=0],pch=19,cex=1,col="pink")
+  points(x[y<=0],y[y<=0],pch=19,cex=1,col="steelblue")
+  
+  points(x[y>=1.96],y[y>=1.96],cex=1,pch=19,col="red")
+  points(x[y<=(-1.96)],y[y<=(-1.96)],cex=1,pch=19,col="blue")
+  segments(min(x),0,max(x),0,lty=2)
+  segments(min(x),1.96,max(x),1.96,lty=2)
+  segments(min(x),-1.96,max(x),-1.96,lty=2)
+  
+ 
+  # plot(x,y)
+  if (position=="rt") {  
+    texty<-max(y)*1.3
+    textx<-max(x)- 0.6*(max(x)-min(x)) }
+  if (position=="rb") {  
+    texty<-min(y)+0.025*(max(y)-min(y))
+    textx<-max(x)- 0.28*(max(x)-min(x)) }
+  if (position=="lt") {  
+    texty<-max(y)-0.025*(max(y)-min(y))
+    textx<-min(x)+0.02*(max(x)-min(x)) }
+  if (position=="lb") {  
+    texty<-min(y)+0.025*(max(y)-min(y))
+    textx<-min(x)+0.02*(max(x)-min(x))  }
+  
+  if (term==1) {fit<-lm(y~x)  }
+  if (term==2) {fit<-lm(y~x+I(x^2))  }
+  if (term==3) {fit<-lm(y~x+I(x^2)+I(x^3))  }
+  if (term=="e") {fit<-lm(y~exp(-x))  }
+  
+  f<-summary(fit)[10][[1]]
+  p<-pf(f[1],f[2],f[3],lower.tail=F)#用f检验值计算p值
+   text(textx,texty+0.01*(max(y)-min(y)),expression(R^2),cex=2,adj=c(0,1),col="black")
+  
+  if (p<0.05) #显著才画线
+  {
+    pred <- predict(fit)
+    ix <- sort(x, index.return=T)$ix
+    lines(x[ix], pred[ix], col=lcol, lwd=lwidth)
+    if(p<0.05&&p>=0.01){     text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.05",sep=" "),cex=2,adj=c(0,1),col="white")}
+    if(p<0.01&&p>=0.001){    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.01",sep=" "),cex=2,adj=c(0,1),col="white")}
+    if(p<0.001)         {    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.001",sep=" "),cex=2,adj=c(0,1),col="white")}
+  }#分情况标注p
+  if (p>=0.05) 
+  {
+    fit<-lm(y~x) 
+    f<-summary(fit)[10][[1]]
+    p<-pf(f[1],f[2],f[3],lower.tail=F)#用f检验值计算p值
+     text(textx,texty+0.02*(max(y)-min(y)),expression(R^2),cex=2,adj=c(0,1),col="black")
+    }
+    if (p<0.05) #显著才画线
+    {
+      pred <- predict(fit)
+      ix <- sort(x, index.return=T)$ix
+      lines(x[ix], pred[ix], col=lcol, lwd=lwidth)
+      if(p<0.05&&p>=0.01){     text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.05",sep=" "),cex=2,adj=c(0,1),col="black")}
+      if(p<0.01&&p>=0.001){    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.01",sep=" "),cex=2,adj=c(0,1),col="black")}
+      if(p<0.001)         {    text(textx,texty,paste("    =",round(summary(fit)[8][[1]],3),"   P<0.001",sep=" "),cex=2,adj=c(0,1),col="black")}
+    }#分情况标注p
+    
+  
+  
+  #添加趋势线
+  
+}#专门画ses标准净效应的函数，y输入ses.函数输出的原始8列数据框即可
+
+beta.plot<-function(x1,y1,x2,y2,x3,y3,xname="",yname="",mainname="",lc1="black",lc2="blue",lc3="darkred",pc1="gray",pc2="steelblue",pc3="red",term=1){
+  if(class(x1)=="dist"){x1<-dtc(x1)}
+  if(class(x2)=="dist"){x2<-dtc(x2)}
+  if(class(x3)=="dist"){x3<-dtc(x3)}
+  if(class(y1)=="dist"){y1<-dtc(y1)}
+  if(class(y2)=="dist"){y2<-dtc(y2)}
+  if(class(y3)=="dist"){y3<-dtc(y3)}
+  plot(x1,y1,type="no",main = mainname,ylab=yname,xlab=xname,cex.axis=1.5,cex.lab=2,cex.main=3,
+       xlim=c(min(min(x1),min(x2),min(x3)),max(max(x1),max(x2),max(x3))),ylim=c(min(min(y1),min(y2),min(y3)),1.2*max(max(y1),max(y2),max(y3))))
+  points(x1,y1,pch=19,col=pc1)
+  points(x2,y2,pch=19,col=pc2)
+  points(x3,y3,pch=19,col=pc3)
+  tr.l(x1,y1,lc=lc1,term1=term)
+  tr.l(x2,y2,lc=lc2,term1=term)
+  tr.l(x3,y3,lc=lc3,term1=term)
+  legend(
+    x=min(min(x1),min(x2),min(x3)),
+    #x = min(min(x1),min(x2),min(x3))+0.7*(max(max(x1),max(x2),max(x3))-min(min(x1),min(x2),min(x3))), 
+    y=1.2*max(max(y1),max(y2),max(y3)),# x y 左上角Position
+    legend = c("Plot level", "Community level","Vegetation level"),  # Legend texts
+    lty = c(1, 1,1),           # Line types
+    col = c(lc1,lc2,lc3),           # Line colors
+    lwd = 3,bty="n",
+    y.intersp = 1,
+    cex = 1.3)   #bty="n"无边框
+}#画beta多样性和趋势线#输入前转化距离矩阵为列
+
+coef.comp<-function(x1,y1,x2,y2,x3,y3,n1,n2){
+ # 默认输入1样方尺度，2群落尺度，3植被尺度
+ # t<-data.frame(x=dtc(d.p.area159),y=beta.sr.plot,g="plot")
+ # t1<-data.frame(x=dtc(d.c.area51),y=beta.sr.comm,g="comm")
+  #a12<-rbind(data.frame(x=x1,y=y1,g="plot"),data.frame(x=x2,y=y2,g="comm"))
+  #x1 <-disttocolum(d.p.area159) 
+ # y1<-(beta.sr.plot)
+ # x2 <-disttocolum(d.c.area51)  
+ # y2<-(beta.sr.comm)
+  #x3<- disttocolum(d.v.area) 
+  #y3<-(beta.sr.vege)  
+  p<-summary(lm(y1~x1))[[4]][2,1]
+  #a23<-rbind(data.frame(x=x2,y=y2,g="comm"),data.frame(x=x3,y=y3,g="vege"))
+ # cv<-summary(lm(y~x+x:g,data=a23))[[4]][3,4]
+  c<-summary(lm(y2~x2))[[4]][2,1]
+  #a13<-rbind(data.frame(x=x1,y=y1,g="plot"),data.frame(x=x3,y=y3,g="vege"))
+  v<-summary(lm(y3~x3))[[4]][2,1]
+  r<-data.frame(xy=paste(n1,n2,sep = "_"),p_=p,c_=c,v_=v)
+  return(r)
+}#比较回归系数
+vertice.filter<-function(pc2_8,spe_famlist){
+  pc2_8[is.na(pc2_8)]<-0#把非顶点的次数改成0
+  pc2_8[,9]<-rowSums(pc2_8[,2:8])/(7*pc2_8[,1])
+  pc2_8[,10]<-c(1:dim(pc2_8)[1])
+  pc2_8[,11]<-rownames(pc2_8)
+  pc2_801<-pc2_8[(pc2_8[,9]==0|pc2_8[,9]==1),9:11]#提取出充当顶点比例为0和为1的种
+  pc2_801[,4]<-spe_famlist[spe_famlist[,1]%in%pc2_801[,3],2]
+  return(pc2_801)
+}#输入顶点矩阵和物种-所属科列表，返回顶点次数为0和1的物种列表
+trait_ratio<-function(twocol){
+  uniquevalue<-unique(twocol[,2])#海拔
+  uniquetrait<-unique(twocol[,1])#性状
+  #length(uniquetrait)
+  temp3 <- NULL
+  for (i in 1:length(uniquevalue)) {
+    temp1 <- twocol[twocol[, 2] == uniquevalue[i], ]
+    
+    temp2 <- NULL
+    for (j in 1:length(uniquetrait)) {
+      temp2<-cbind(temp2,round(sum(temp1[,1]==uniquetrait[j])/dim(temp1)[1],3))  
+    }
+    temp3<-rbind(temp3,temp2)
+  }
+  colnames(temp3)<-uniquetrait
+  temp3<-data.frame(Elevation=uniquevalue,temp3)
+  names(temp3)[1]<-names(twocol)[1]
+  return(temp3)
+  remove(temp1,temp2,temp3)
+}#质量性状各海拔的占比，输入第一列性状，第二列海拔
+trait_ratio.plot<-function(mratio){
+  plot(mratio[,1],mratio[,2],pch=19,col="white",ylim=c(0,max(mratio[,2:length(mratio[1,])])),xlab="Elevation (m)",
+       ylab="Trait ratio (%)",main=colnames(mratio)[2:length(colnames(mratio))],cex.main=2,cex.lab=1.5,cex.axis=1.5)
+#  colorlist<-c("steelblue","orange","pink","green","aquamarine","yellow","violet","black")
+  for (i in 2:length(mratio[1,])) {
+    points(mratio[order(mratio[, 1]), 1],
+           mratio[order(mratio[, 1]), i],
+           lty = 1,
+           pch = 19,
+           #   col=colorlist[i-1],
+           cex = (1))  
+   if (F) {
+          lines(lowess(mratio[order(mratio[, 1]), 1], mratio[order(mratio[, 1]), i], f =
+                   3) ,  col = "steelblue",   #  col=colorlist[i-1]
+          lwd=2
+          )
+
+   }
+    
+  }
+  #legend("topleft",cex=2, bty="n",y.intersp=1,inset = 0.02, border="white",legend=colnames(mratio)[2:length(colnames(mratio))],
+ #        lty=c(1),  pch=c(19)
+         #col=colorlist[1:length(mratio[1,])]
+  #       )
+}#输入海拔和性状比例的矩阵
+trait_num.plot<-function(mratio,mainname){
+  plot(
+    mratio[, 1],
+    mratio[, 2],
+    pch = 19,
+    col = "white",
+    ylim = c(0, max(mratio[, 2:length(mratio[1, ])])),
+    xlab = "Elevation (m)",
+    ylab = "Trait value",
+    main = mainname,
+    cex.main = 2,cex.lab=1.5,cex.axis=1.5
+  )
+  #  colorlist<-c("steelblue","orange","pink","green","aquamarine","yellow","violet","black")
+ # for (i in 2:length(mratio[1,])) {
+    points(       mratio[order(mratio[,1]),1], mratio[order(mratio[,1]),2],lty=1,pch=19,
+                  #   col=colorlist[i-1],
+                  cex=0.7)  
+   # lines(  lowess(mratio[order(mratio[,1]),1], mratio[order(mratio[,1]),2],f=3) ,  col="steelblue"   #  col=colorlist[i-1]
+   # )
+    
+ # }
+  #legend("topleft",cex=1, bty="n",y.intersp=1,inset = 0.02, border="white",legend=colnames(mratio)[2:length(colnames(mratio))],
+    #     lty=c(1), pch=c(19), 
+         #col=colorlist[1:length(mratio[1,])]
+ # )
+}#数量性状
+
+single.mantel <-function(spe,env, sim.method, correlation, p.adjust.m){
+  library(vegan)
+  co = colnames(env)
+  factor = c()
+  r = c()
+  p.value=c()
+  spe.dist<-vegdist(spe,method = sim.method)
+  for(elem in 1:length(co)){
+    env.dist = vegdist(env[elem], method = "euclidean")
+    ad = vegan::mantel(spe.dist, env.dist, permutations = 999,method=correlation);    
+    factor = c(factor,co[elem]);    
+    r = c(r,ad$statistic);   
+    p.value=c(p.value, ad$signif)
+  }
+  p.adjusted =p.adjust(p.value,method=p.adjust.m) 
+  pairw.res = data.frame(factor, r, p.value, p.adjusted) 
+  return(pairw.res)
+} # 不需更改
+tr.l<-function(x,y,lc="black",lw=3,term1=1){
+  ifelse(term1==1,
+         fit<-lm(y~x),
+         fit<-lm(y~x+I(x^2))
+         )
+  
+f<-summary(fit)[10][[1]]
+p<-pf(f[1],f[2],f[3],lower.tail=F)#用f检验值计算p值
+if (p<0.05) #显著才画线
+{
+  pred <- predict(fit)
+  ix <- sort(x, index.return=T)$ix
+  lines(x[ix], pred[ix], col=lc, lwd=lw)
+}}#显著就画趋势线，一次或二次
+cf.l<-function(x,y){
+  o<-order(x)#排序
+  pdc<-predict(lm(y[o]~x[o]+I(x[o]^2)+I(x[o]^3)),interval = "confidence")#预测值和置信区间上下限
+  lines(x[o],pdc[,1])
+  lines(x[o],pdc[,2],lty=2,col="grey50")
+  lines(x[o],pdc[,3],lty=2,col="grey50")
+}#画三项式曲线和置信区间
+x<-l.x[[1]]
+y<-l.sr[[1]]
+yname<-"sr"
+ses.model.sel.avg<-function(x,y,yname){
+  masr1<-bmsr1<-NULL#model average、best model
+  #glmd <- lm(y~PRE+AREA+HET, data = x)#创建总模型
+  glmd <- lm(y~P+A+H, data = x)#创建总模型
+  options(na.action = na.fail)#设置NA处理方法
+  dre.obj<-MuMIn::dredge(glmd, beta = "sd", evaluate = TRUE,rank = "AICc",extra = "adjR^2")#extra调出附加值r方
+  write.csv(dre.obj,"c:/d/temp.csv")#读出再读入，则可方便提取第一行最优模型
+  temp<-read.csv("c:/d/temp.csv",row.names = 1,header=T)
+  bmsr1<-rbind(bmsr1,temp[1,])#第一行最优模型
+  
+  mdav<-MuMIn::model.avg(object=dre.obj)#模型平均
+  s<-as.data.frame(summary(mdav)[[10]])#提取变量系数矩阵
+  s<-na.omit(s)#去掉截距
+  s[,6]<-row.names(s)#加一行变量名
+  s<-s[order(s[,6]),]#按变量名排序
+  for (i in 1:nrow(s)) {
+    if (s[i,5]>0.01&s[i,5]<0.05) {s[i,7]<-"*"}
+    if (s[i,5]>0.001&s[i,5]<0.01) {s[i,7]<-"**"}
+    if (s[i,5]>=0.00&s[i,5]<0.001) {s[i,7]<-"***"}
+    if (s[i,5]>0.05) {s[i,7]<-""}#添加显著度到第七行
+  }
+  
+  masr1<-as.data.frame(paste(round(s[,1],3),s[,7],sep=""))
+  row.names(masr1)<-row.names(s)
+  names(masr1)<-yname
+  rownames(bmsr1)[1]<-yname
+  
+  return(list(bmsr1,masr1))
+}#ses输出数据的模型选择和模型平均
+model.sel.avg3<-function(x,y,yname,term=1){
+ # x<-as.data.frame(scale(data.frame(A=l.area3[[2]][,2],C=l.clim3[[2]][,2])))
+ # y<-ses.alpha.pd.comm[,6]
+ # yname<-"ses.alpha.pd.comm"
+  masr1<-bmsr1<-NULL#model average、best model
+  #glmd <- lm(y~PRE+AREA+HET, data = x)#创建总模型
+  ifelse(term==1,
+         glmd <- lm(y~C+A, data = x),
+         glmd <- lm(y~C+A+I(C^2)+I(A^2), data = x)
+         )
+ # glmd <- lm(y~C+A, data = x)#创建总模型
+  options(na.action = na.fail)#设置NA处理方法
+  dre.obj<-MuMIn::dredge(glmd, beta = "sd", evaluate = TRUE,rank = "AICc",extra = "adjR^2")#extra调出附加值r方
+  write.csv(dre.obj,"c:/d/temp.csv")#读出再读入，则可方便提取第一行最优模型
+  temp<-read.csv("c:/d/temp.csv",row.names = 1,header=T)
+  bmsr1<-rbind(bmsr1,temp[1,])#第一行最优模型
+  
+  mdav<-MuMIn::model.avg(object=dre.obj)#模型平均
+  s<-as.data.frame(summary(mdav)[[10]])#提取变量系数矩阵
+  s<-na.omit(s)#去掉截距
+  s[,6]<-row.names(s)#加一行变量名
+  s<-s[order(s[,6]),]#按变量名排序
+  for (i in 1:nrow(s)) {
+    if (s[i,5]>0.01&s[i,5]<0.05) {s[i,7]<-"*"}
+    if (s[i,5]>0.001&s[i,5]<0.01) {s[i,7]<-"**"}
+    if (s[i,5]>=0.00&s[i,5]<0.001) {s[i,7]<-"***"}
+    if (s[i,5]>0.05) {s[i,7]<-""}#添加显著度到第七行
+  }
+  
+  masr1<-as.data.frame(paste(round(s[,1],3),s[,7],sep=""))
+  row.names(masr1)<-row.names(s)
+  names(masr1)<-yname
+  rownames(bmsr1)[1]<-yname
+  
+  return(list(bmsr1,masr1))
+}#ses输出数据的模型选择和模型平均
+
+mab10<-function(xl,yl,yname){
+ # xl<-l.x
+ # yl<-l.sr
+ # yname<-"sr"
+  rb<-ra<-NULL
+  for (j in 1:10) {
+   # j<-1
+    x<-xl[[j]]
+    y<-yl[[j]]
+      masr1<-bmsr1<-NULL#model average、best model
+
+  
+  #glmd <- lm(y~PRE+AREA+HET, data = x)#创建总模型
+  glmd <- lm(y~P+A+H, data = x)#创建总模型
+  options(na.action = na.fail)#设置NA处理方法
+  dre.obj<-MuMIn::dredge(glmd, beta = "sd", evaluate = TRUE,rank = "AICc",extra = "adjR^2")#extra调出附加值r方
+  write.csv(dre.obj,"c:/d/temp.csv")#读出再读入，则可方便提取第一行最优模型
+  temp<-read.csv("c:/d/temp.csv",row.names = 1,header=T)
+  bmsr1<-rbind(bmsr1,temp[1,])#第一行最优模型
+  
+  mdav<-MuMIn::model.avg(object=dre.obj)#模型平均
+  s<-as.data.frame(summary(mdav)[[10]])#提取变量系数矩阵
+  s<-na.omit(s)#去掉截距
+  s[,6]<-row.names(s)#加一行变量名
+  s<-s[order(s[,6]),]#按变量名排序
+  for (i in 1:nrow(s)) {
+    if (s[i,5]>0.01&s[i,5]<0.05) {s[i,7]<-"*"}
+    if (s[i,5]>0.001&s[i,5]<0.01) {s[i,7]<-"**"}
+    if (s[i,5]>=0.00&s[i,5]<0.001) {s[i,7]<-"***"}
+    if (s[i,5]>0.05) {s[i,7]<-""}#添加显著度到第七行
+  }
+  
+  masr1<-as.data.frame(paste(round(s[,1],3),s[,7],sep=""))
+  row.names(masr1)<-row.names(s)
+  names(masr1)<-yname
+  rownames(bmsr1)[1]<-yname
+rb<-rbind(rb,bmsr1)
+ifelse(is.null(ra),ra<-masr1,ra<-cbind(ra,masr1))
+
+  }
+  return(list(rb,ra))
+}#ses输出数据的模型选择和模型平均
+mab10(l.x,l.sr,"sr")
+ses.model.sel.avg.sq<-function(xinfo,ses,yname){
+  masr1<-bmsr1<-NULL#model average、best model
+  
+  glmd <- lm(ses~PRE+AREA+HET+I(PRE^2)+I(AREA^2)+I(HET^2), data = xinfo)#创建总模型
+  options(na.action = na.fail)#设置NA处理方法
+  dre.obj<-MuMIn::dredge(glmd, beta = "sd", evaluate = TRUE,rank = "AICc",extra = "adjR^2")#extra调出附加值r方
+  write.csv(dre.obj,"c:/d/temp.csv")#读出再读入，则可方便提取第一行最优模型
+  temp<-read.csv("c:/d/temp.csv",row.names = 1,header=T)
+  bmsr1<-rbind(bmsr1,temp[1,])#第一行最优模型
+  
+  mdav<-MuMIn::model.avg(object=dre.obj)#模型平均
+  s<-as.data.frame(summary(mdav)[[10]])#提取变量系数矩阵
+  s<-na.omit(s)#去掉截距
+  s[,6]<-row.names(s)#加一行变量名
+  s<-s[order(s[,6]),]#按变量名排序
+  for (i in 1:nrow(s)) {
+    if (s[i,5]>0.01&s[i,5]<0.05) {s[i,7]<-"*"}
+    if (s[i,5]>0.001&s[i,5]<0.01) {s[i,7]<-"**"}
+    if (s[i,5]>=0.00&s[i,5]<0.001) {s[i,7]<-"***"}
+    if (s[i,5]>0.05) {s[i,7]<-""}#添加显著度到第七行
+  }
+  
+  masr1<-as.data.frame(paste(round(s[,1],3),s[,7],sep=""))
+  row.names(masr1)<-row.names(s)
+  names(masr1)<-yname
+  rownames(bmsr1)[1]<-yname
+  
+  return(list(bmsr1,masr1))
+}#ses输出数据的含二次项的模型选择和模型平均
+ses.beta.mntd<-function(m01,dist,times=999){
+  
+  beta.mntd.raw <- picante::comdistnt(m01, dist,abundance.weighted=F)
+  mntd.obs <- t(as.vector(t(beta.mntd.raw)))
+  mntd.rand <- replicate(times,as.vector(t(picante::comdistnt(m01,picante::taxaShuffle(dist),abundance.weighted = F))))
+  mntd.rand.mean <- apply(X = mntd.rand, MARGIN = 1, FUN = mean, na.rm = TRUE)
+  mntd.rand.sd <- apply(X = mntd.rand, MARGIN = 1, FUN = sd, na.rm = TRUE)
+  mntd.obs.z <- as.vector((mntd.obs - mntd.rand.mean)/mntd.rand.sd)
+  
+  beta.mntd <- data.frame(as.vector(mntd.obs), mntd.rand.mean, mntd.rand.sd,mntd.obs.z)
+  
+  a <- rownames(m01)
+  X <- c()
+  for (i in 2:length(a)) {  X <- c(X,a[i:length(a)])}
+  Y <-c()
+  for (i in 1:length(a)) {  Y <- c(Y,rep(a[i],length(a)-i))}
+  beta.mntd2 <- cbind(X,Y,beta.mntd)
+  return(beta.mntd2)
+}#算ses.beta.mntd#红皇后学术
+ses.beta.mpd<-function(m01,dist,times=999){
+  
+  beta.mpd.raw <- picante::comdist(m01, dist,abundance.weighted=F)
+  mpd.obs <- t(as.vector(t(beta.mpd.raw)))
+  mpd.rand <- replicate(times,as.vector(t(picante::comdist(m01,picante::taxaShuffle(dist),abundance.weighted = F))))
+  mpd.rand.mean <- apply(X = mpd.rand, MARGIN = 1, FUN = mean, na.rm = TRUE)
+  mpd.rand.sd <- apply(X = mpd.rand, MARGIN = 1, FUN = sd, na.rm = TRUE)
+  mpd.obs.z <- as.vector((mpd.obs - mpd.rand.mean)/mpd.rand.sd)
+  
+  beta.mpd <- data.frame(as.vector(mpd.obs), mpd.rand.mean, mpd.rand.sd,mpd.obs.z)
+  
+  a <- rownames(m01)
+  X <- c()
+  for (i in 2:length(a)) {  X <- c(X,a[i:length(a)])}
+  Y <-c()
+  for (i in 1:length(a)) {  Y <- c(Y,rep(a[i],length(a)-i))}
+  beta.mpd2 <- cbind(X,Y,beta.mpd)
+  return(beta.mpd2)
+}#算ses.beta.mpd
+
+#存档####
+
+save(l.clim2.g9,climcomp2,l.b.c2.ttshw,
+  rp,pl,model.sel.avg3,
+  l.area3,l.b.area3,l.clim3,l.b.clim3,l.ele3,l.b.ele3,l.clim.g9,
+  l.ses.mfd.group,l.ses.mnfd.group,
+  l.m01_10,l.m01_10no,
+  l.ses.b.mpd,l.ses.b.mfd,
+  l.b.pd.g,l.b.mpd.g,l.b.mntd.g,
+  
+  lf.names,comp.names,scl.names,
+  l.splistforV2,l.ml.tree,l.m01_,l.m01,
+  l.pd.group,l.ml_phy_dist,l.mpd.group,l.mntd.group,
+  l.ses.pd.group,l.ses.mpd.group,l.ses.mntd.group,
+  l.ml,l.m01,l.ele,l.b.sr.ttshw,l.b.e.ttshw,l.b.c.ttshw,l.clim,climcomp1,#物种多样性，生活型分组
+  
+  b.sr.10,b.pd.10,b.fd.10,b.sr.pcv,b.pd.pcv,b.fd.pcv,
+  l.b.fd.n,
+  colvec,color,#15种颜色的向量
+  ml, for_averageif,                #样方-物种数据,#海拔-气候数据
+     m01_plot,  m01_comm,  m01_vege,       #样方/群落/植被-物种01矩阵
+     m01_plot_,  m01_comm_,  m01_vege_,       #样方/群落/植被-物种01矩阵 物种名空格为_
+     
+     xinfo_plot,    xinfo_comm,  xinfo_vege,   #样方/群落/植被-绘图的x轴及标签
+     dist_plot,   dist_comm,   dist_vege,    #样方/群落/植被-海拔距离
+     
+     alpha.sr.plot,  alpha.sr.comm,  alpha.sr.vege,                       #样方/群落/植被-物种alpha多样性
+     beta.sr.plot,   beta.sr.comm,   beta.sr.vege,                        #样方/群落/植被-物种beta多样性sorensen
+     
+     splistforV2,  ml.tree,    ml_phy_dist,       #建树物种列表，梅里总树,  系统发育距离矩阵
+
+     alpha.pd.plot,  alpha.pd.comm,  alpha.pd.vege,                       #样方/群落/植被-谱系alpha多样性-pd (Faith)
+     alpha.mpd.plot,  alpha.mpd.comm,  alpha.mpd.vege,                    #样方/群落/植被-谱系alpha多样性-mpd
+     alpha.mntd.plot,  alpha.mntd.comm,  alpha.mntd.vege,                 #样方/群落/植被-谱系alpha多样性-mntd
+     ses.alpha.pd.plot,  ses.alpha.pd.comm,  ses.alpha.pd.vege,           #样方/群落/植被-谱系alpha多样性-ses pd (Faith)
+     ses.alpha.mpd.plot,  ses.alpha.mpd.comm,  ses.alpha.mpd.vege,        #样方/群落/植被-谱系alpha多样性-ses mpd  
+     ses.alpha.mntd.plot,  ses.alpha.mntd.comm,  ses.alpha.mntd.vege,     #样方/群落/植被-谱系alpha多样性-ses mntd
+     
+     beta.pd.plot,    beta.pd.comm,    beta.pd.vege,                          #样方/群落/植被-谱系beta多样性phylosorensen
+     beta.mpd.plot,    beta.mpd.comm,    beta.mpd.vege,                       #样方/群落/植被-谱系beta多样性-beta_mpd
+     beta.mntd.plot,    beta.mntd.comm,    beta.mntd.vege,                    #样方/群落/植被-谱系beta多样性-beta_mntd
+     
+     traits,  scaled.traits,  ml_fun_dist,  #物种性状,  功能距离矩阵
+     cor.p.colum,   trait.cor.p,  #性状相关性     
+     traits.cat,   ml_fun_dist_mfd,   ##物种性状类型,  新mfd功能距离矩阵
+     fruits_traits,    fruits_traits_cat,    baskets_fruits_weights,  #mfd包自带预置数据
+     fspaces_quality_ml,    sp_faxes_coord_ml,    #ml_tr_faxes,  #性状空间质量，pcoa所有轴，轴和性状相关性
+     
+     alpha.exclude,  beta.exclude.row,   beta.exclude.col,#排除样方索引
+     alpha_fd_plot,  alpha_fd_comm,  alpha_fd_vege,                       #样方/群落/植被-功能alpha多样性-mFD包基于pcoa坐标计算
+
+     alpha.mfd.plot,  alpha.mfd.comm,  alpha.mfd.vege,                    #样方/群落/植被-功能alpha多样性-mfd(mean functional pairwise dist)
+     alpha.mnfd.plot,  alpha.mnfd.comm,  alpha.mnfd.vege,                 #样方/群落/植被-功能alpha多样性-mnfd
+     ses.alpha.mfd.plot,  ses.alpha.mfd.comm,  ses.alpha.mfd.vege,        #样方/群落/植被-功能alpha多样性-ses mfd
+     ses.alpha.mnfd.plot,  ses.alpha.mnfd.comm,  ses.alpha.mnfd.vege,     #样方/群落/植被-功能alpha多样性-ses mnfd
+
+     beta_fd_plot,  beta_fd_comm,  beta_fd_vege,                          #样方/群落/植被-功能beta多样性-mFD包,sorensen diss原始列表
+     
+     beta.fd.plot,  beta.fd.comm,  beta.fd.vege,                          #样方/群落/植被-功能beta多样性-mFD包,sorensen距离矩阵
+     beta.mfd.plot,  beta.mfd.comm,  beta.mfd.vege,                       #样方/群落/植被-功能beta多样性-mfd(mean functional pairwise dist)
+     beta.mnfd.plot,  beta.mnfd.comm,  beta.mnfd.vege,                    #样方/群落/植被-功能beta多样性-mnfd
+     
+     ses.beta.mntd.plot,ses.beta.mntd.comm,ses.beta.mntd.vege,
+     ses.beta.mpd.plot, ses.beta.mpd.comm, ses.beta.mpd.vege,
+  ses.beta.mpd.plot.999,
+  ses.beta.mntd.comm.999,ses.beta.mntd.plot.999,ses.beta.mntd.vege.999,
+     vertice_plot,  vertice_comm,  vertice_vege,                       #样方/群落/植被-功能空间的凸多边形顶点物种，两列
+     pc2_8.vertice.plot,  pc2_8.vertice.comm,  pc2_8.vertice.vege,     #样方/群落/植被-功能空间的凸多边形顶点在同数量的轴下的物种
+     vertice.plot,  vertice.plot,  vertice.plot,#不同数量轴下始终占据顶点的物种和始终不占据的物种
+     avg_rlt2,#气候平均
+     
+     xinfo.plot,    xinfo.comm,  xinfo.vege, xinfo.plot.for.beta,  #样方/群落/植被模型选择的x和y
+     d.v.ele,     d.v.pre,     d.v.het,     d.v.area,
+     d.c.ele50,     d.c.pre50,     d.c.het50,     d.c.area50,
+     d.c.ele51,     d.c.pre51,     d.c.het51,     d.c.area51,
+     d.p.ele154,     d.p.pre154,     d.p.het154,     d.p.area154,
+     d.p.ele159,     d.p.pre159,     d.p.het159,     d.p.area159,#用于功能beta(50-51,154-159)和谱系beta(51,159)的自变量
+     rst,betalist.plot,betalist.comm,betalist.vege,
+  l.m01,l.m01no,l.res,
+  l.pd,l.mpd,l.mntd,l.sespd,l.sesmpd,l.sesmntd,l.b.pd,l.b.mpd,l.b.mntd,l.ses.b.mntd,#pd 的alpha beta
+  l.sr,l.beta.sr,#sr 的alpha beta
+  l.fric,l.fdis,l.feve,l.fdiv,l.mfd,l.mnfd,l.b.fd,l.b.mfd,l.b.mnfd,l.ses.b.mnfd,l.ses.mfd,l.ses.mnfd,#fd 的alpha beta
+
+  l.d.e,pha,l.x,l.y,l.mab10.r,d,
+  
+     columtomatrix,  speciesrichness,  meanmaxmin,  sorensen1,  sorensen2,  sorensen3,  #自定义函数
+     disttocolum,  trait_ratio,  plot.trendl.pr,  plot.trendl,  cor.p,  extract.a.fd,  verticelist,
+     lessfillmore, pc.vertice, cor.sig,ses.plot,beta.plot,vertice.filter,  trait_ratio.plot, trait_num.plot,
+     ses.model.sel.avg,ses.model.sel.avg.sq,mantel.rst,tt,ses.beta.mntd,ses.beta.mpd,ses.beta.plot,dtc,tr.l,cf.l,
+  plot.res.f.a,l.findmami,mab10,
+     file="c:/d/r/meili2/meili2.RData")
+
+
+##############
+load(file="c:/d/r/meili2/meili2.RData")#加载环境中的变量 
+
+
+
+#原始数据####
+ml<-read.csv("c:/d/r/meili2/meili2.csv",header = T)#样方-物种数据
+for_averageif<-read.csv("C:/D/r/meili2/for_averageif.csv",header=TRUE)#海拔-气候数据
+
+m01_plot<-columtomatrix(unique(ml[,c( 3,2)]))#样方-物种01矩阵
+m01_comm<-columtomatrix(unique(ml[,c(3,20)]))#群落-物种01矩阵
+m01_vege<-columtomatrix(unique(ml[,c(3,18)]))#植被-物种01矩阵
+
+xinfo_plot<-meanmaxmin(unique(ml[,c( 2,17)]))#绘图的x轴及标签
+xinfo_comm<-meanmaxmin(unique(ml[,c(20,17)]))#绘图的x轴及标签
+xinfo_vege<-meanmaxmin(unique(ml[,c(18,17)]))#绘图的x轴及标签
+
+#物种####
+alpha.sr.plot<-speciesrichness(m01_plot)#样方物种alpha多样性
+alpha.sr.comm<-speciesrichness(m01_comm)#群落物种alpha多样性
+alpha.sr.vege<-speciesrichness(m01_vege)#植被物种alpha多样性
+
+beta.sr.plot<-sorensen(m01_plot)#样方间物种beta多样性
+beta.sr.comm<-sorensen(m01_comm)#群落间物种beta多样性
+beta.sr.vege<-sorensen(m01_vege)#植被间物种beta多样性
+#谱系####
+splistforV2<-data.frame(unique(ml[,3:5]),species.relative=c(""), genus.relative=c(""))#提取种属科
+names(splistforV2)<-c("species","genus","family","species.relative","genus.relative")#构造5列满足Vphylo要求
+ml.tree <- V.PhyloMaker::phylo.maker(sp.list = splistforV2,  nodes = nodes.info.1.TPL, scenarios = "S3")#建树
+
+
+m01_plot_<-m01_plot
+names(m01_plot_)<-gsub(" ","_",names(m01_plot_))
+m01_comm_<-m01_comm
+names(m01_comm_)<-gsub(" ","_",names(m01_comm_))
+m01_vege_<-m01_vege
+names(m01_vege_)<-gsub(" ","_",names(m01_vege_))
+#Error in UseMethod("is.rooted") :    no applicable method for 'is.rooted' 
+#是因为群落-物种表里的物种名没有加下划线
+
+alpha.pd.plot<-pd (m01_plot_,ml.tree$scenario.3)#样方系统发育alpha多样性-faith pd
+alpha.pd.comm<-pd (m01_comm_,ml.tree$scenario.3)#群落系统发育alpha多样性-faith pd
+alpha.pd.vege<-pd (m01_vege_,ml.tree$scenario.3)#植被系统发育alpha多样性-faith pd
+
+ml_phy_dist <- picante::cophenetic(ml.tree$scenario.3)# 用树来算系统发育距离矩阵#library(picante)
+#Error in as.hclust.default(x) : argument 'x' cannot be coerced to class “hclust”Consider providing an as.hclust.phylo() method
+#是因为没有加载picante
+
+alpha.mpd.plot<-mpd(m01_plot_,ml_phy_dist,abundance.weighted=F)
+alpha.mpd.comm<-mpd(m01_comm_,ml_phy_dist,abundance.weighted=F)
+alpha.mpd.vege<-mpd(m01_vege_,ml_phy_dist,abundance.weighted=F)#样方/群落/植被-系统发育alpha多样性-mpd
+
+alpha.mntd.plot<-mntd(m01_plot_,ml_phy_dist,abundance.weighted=F)
+alpha.mntd.comm<-mntd(m01_comm_,ml_phy_dist,abundance.weighted=F)
+alpha.mntd.vege<-mntd(m01_vege_,ml_phy_dist,abundance.weighted=F)#样方/群落/植被-系统发育alpha多样性-mntd
+
+ses.alpha.pd.plot<- ses.pd(m01_plot_, ml.tree$scenario.3, null.model = "taxa.labels",  runs = 999)#900s
+ses.alpha.pd.comm<- ses.pd(m01_comm_, ml.tree$scenario.3, null.model = "taxa.labels",  runs = 999)#330s
+ses.alpha.pd.vege<- ses.pd(m01_vege_, ml.tree$scenario.3, null.model = "taxa.labels",  runs = 999)#样方/群落/植被-系统发育alpha多样性-sespd#79s
+
+ses.alpha.mpd.plot<-ses.mpd(m01_plot_,ml_phy_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#850s
+ses.alpha.mpd.comm<-ses.mpd(m01_comm_,ml_phy_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#265s
+ses.alpha.mpd.vege<-ses.mpd(m01_vege_,ml_phy_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#56s样方/群落/植被-系统发育alpha多样性-sesmpd
+
+ses.alpha.mntd.plot<-ses.mntd(m01_plot_,ml_phy_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#846s
+ses.alpha.mntd.comm<-ses.mntd(m01_comm_,ml_phy_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#297s
+ses.alpha.mntd.vege<-ses.mntd(m01_vege_,ml_phy_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#样方/群落/植被-系统发育alpha多样性-sesmntd
+t<-proc.time()
+proc.time()-t
+
+beta.pd.plot<-picante::phylosor(m01_plot_, ml.tree$scenario.3)#样方间系统发育beta多样性#library(picante)
+beta.pd.comm<-picante::phylosor(m01_comm_, ml.tree$scenario.3)#群落间系统发育beta多样性#library(picante)
+beta.pd.vege<-picante::phylosor(m01_vege_, ml.tree$scenario.3)#植被间系统发育beta多样性#library(picante)
+#Error in UseMethod("is.rooted") :    no applicable method for 'is.rooted' 
+#是因为群落-物种表里的物种名没有加下划线
+
+beta.mpd.plot<-picante::comdist(m01_plot_,ml_phy_dist,abundance.weighted=F)#100s
+beta.mpd.comm<-picante::comdist(m01_comm_,ml_phy_dist,abundance.weighted=F)
+beta.mpd.vege<-picante::comdist(m01_vege_,ml_phy_dist,abundance.weighted=F)#样方/群落/植被-系统发育beta多样性-beta_mpd
+t<-proc.time()
+beta.mntd.plot<-picante::comdistnt(m01_plot_,ml_phy_dist,abundance.weighted=F)#131s
+proc.time()-t
+beta.mntd.comm<-picante::comdistnt(m01_comm_,ml_phy_dist,abundance.weighted=F)
+beta.mntd.vege<-picante::comdistnt(m01_vege_,ml_phy_dist,abundance.weighted=F)#样方/群落/植被-系统发育beta多样性-beta_mntd
+
+
+
+
+library(vegan)
+getAnywhere(vegdist)
+do_vegdist
+dist_plot<-dist(data.frame(ele=xinfo_plot[,2],row.names = xinfo_plot[,1]))#样方间的海拔距离
+dist_comm<-dist(data.frame(ele=xinfo_comm[,2],row.names = xinfo_comm[,1]))#群落间的海拔距离
+dist_vege<-dist(data.frame(ele=xinfo_vege[,2],row.names = xinfo_vege[,1]))#植被间的海拔距离
+
+
+plot(xinfo_plot[,2],SR_plot[,2])
+plot(xinfo_comm[,2],SR_comm[,2])
+plot(xinfo_vege[,2],SR_vege[,2])
+
+plot(dist_plot,sor_plot)
+plot(dist_comm,sor_comm)
+plot(dist_vege,sor_vege)
+
+
+#plot.trendl.pr里面有lm函数，lm不能像画图一样直接用距离矩阵画，要转成列
+plot.trendl.pr(disttocolum(dist_plot),sor_plot,lcol="red",lwidth=3,term=1,position="rt")
+plot.trendl.pr(disttocolum(dist_comm),sor_comm,lcol="red",lwidth=3,term=1,position="rt")
+plot.trendl.pr(disttocolum(dist_vege),sor_vege,lcol="red",lwidth=3,term=1,position="rt")
+
+plot.trendl.pr(xinfo_plot[,2],SR_plot[,2],lcol="red",lwidth=3,term=3,position="rt")
+plot.trendl.pr(xinfo_comm[,2],SR_comm[,2],lcol="red",lwidth=3,term=3,position="rt")
+plot.trendl.pr(xinfo_vege[,2],SR_vege[,2],lcol="red",lwidth=3,term=3,position="rt")
+
+
+trait_ratio(ml[,c(12,20)])
+mratio<-trait_ratio(ml[,c(10,17)])
+trait_ratio(ml[,c(11,17)])
+mratio<-trait_ratio(ml[,c(13,17)])
+
+#功能，用picante算####
+rawtraits<-unique(data.frame(species=ml[,3],ml[,6:14]))#提取名字，性状，并去重
+traits<-rawtraits[,2:10]
+rownames(traits)<-rawtraits[,1]#处理成行名为物种，列为性状
+remove(rawtraits)
+
+str(traits)
+for(i in 1:3)  {  traits[,i]<-as.numeric(traits[,i])  }#指定数值变量
+for(i in 4:9)  {  traits[,i]<-as.factor(traits[,i])  }#指定分类变量
+str(traits)#查看指定结果
+head(traits)#查看指定结果
+
+cor.p.colum<-cor.p(traits)
+trait.cor.p<-columtomatrix(cor.p.colum)
+
+ml_fun_dist<-FD::gowdis(traits)#library(FD)#功能性状距离矩阵
+ml_fun_dist<-as.matrix(ml_fun_dist)
+#mpd运行错误:Error in dis[sppInSample, sppInSample] : incorrect number of dimensions
+#是因为ml_fun_dist是由gowdis生成的仅下三角有值的dist类型
+#而ml_phy_dist是满编的matrix类型
+#使用mpd之前要强制转换把dist换成matrix
+alpha.mfd.plot<-
+  mpd(m01_plot,ml_fun_dist,abundance.weighted=F)
+alpha.mfd.comm<-mpd(m01_comm,ml_fun_dist,abundance.weighted=F)
+alpha.mfd.vege<-mpd(m01_vege,ml_fun_dist,abundance.weighted=F)#样方/群落/植被-功能alpha多样性-mfd
+#Error in dis[sppInSample, sppInSample] : subscript out of bounds
+#是因为就算两种距离矩阵形式大小完全一致，要注意行列名的匹配，系统树上的名字生成距离矩阵后空格会被换为_，单独准备一个物种名中间为_的群落矩阵
+#而功能距离矩阵是直接用物种名中间为空格的生成的，因此对应的群落矩阵物种名应当使用原始为“ ”的群落名
+alpha.mnfd.plot<-mntd(m01_plot,ml_fun_dist,abundance.weighted=F)
+alpha.mnfd.comm<-mntd(m01_comm,ml_fun_dist,abundance.weighted=F)
+alpha.mnfd.vege<-mntd(m01_vege,ml_fun_dist,abundance.weighted=F)#样方/群落/植被-功能alpha多样性-mnfd
+
+ses.alpha.mfd.plot<-ses.mpd(m01_plot,ml_fun_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#850s
+ses.alpha.mfd.comm<-ses.mpd(m01_comm,ml_fun_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#265s
+ses.alpha.mfd.vege<-ses.mpd(m01_vege,ml_fun_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#56s样方/群落/植被-系统发育alpha多样性-sesmpd
+
+ses.alpha.mnfd.plot<-ses.mntd(m01_plot,ml_fun_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#900s
+ses.alpha.mnfd.comm<-ses.mntd(m01_comm,ml_fun_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#297s
+ses.alpha.mnfd.vege<-ses.mntd(m01_vege,ml_fun_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#样方/群落/植被-系统发育alpha多样性-sesmntd
+#Error in UseMethod("is.rooted") :    no applicable method for 'is.rooted' 
+#是因为群落-物种表里的物种名没有加下划线
+
+beta.mfd.plot<-comdist(m01_plot,ml_fun_dist,abundance.weighted=F)#100s
+beta.mfd.comm<-comdist(m01_comm,ml_fun_dist,abundance.weighted=F)
+beta.mfd.vege<-comdist(m01_vege,ml_fun_dist,abundance.weighted=F)#样方/群落/植被-功能beta多样性-beta_mfd
+
+beta.mnfd.plot<-comdistnt(m01_plot,ml_fun_dist,abundance.weighted=F)
+beta.mnfd.comm<-comdistnt(m01_comm,ml_fun_dist,abundance.weighted=F)
+beta.mnfd.vege<-comdistnt(m01_vege,ml_fun_dist,abundance.weighted=F)#样方/群落/植被-功能beta多样性-beta_mnfd
+
+alpha.fd.plot<-extract.a.fd(FD::dbFD(x=traits, a=m01_plot))#计算FD#群落和性状两个矩阵的物种顺序要一致
+alpha.fd.comm<-extract.a.fd(FD::dbFD(x=traits, a=m01_comm))#计算FD#群落和性状两个矩阵的物种顺序要一致
+alpha.fd.vege<-extract.a.fd(FD::dbFD(x=traits, a=m01_vege))#计算FD#群落和性状两个矩阵的物种顺序要一致
+
+#mFD算功能alpha β多样性####
+data('fruits_traits', package = 'mFD')#调用mfd预置数据
+data('fruits_traits_cat', package = 'mFD')
+data("baskets_fruits_weights", package = "mFD")
+class(baskets_fruits_weights)
+
+traits.cat <-data.frame(trait_name = names(traits),trait_type = c("Q","Q","Q","N", "N", "N", "N", "N", "N", "N") )
+#性状类型，mfd计算距离除了原始性状之外的必备矩阵
+ml_fun_dist_mfd<-mFD::funct.dist(sp_tr=traits,tr_cat =traits.cat,metric="gower",scale_euclid  = "scale" )
+#新距离矩阵
+round(ml_fun_dist_mfd, 3)  
+
+fspaces_quality_ml <- mFD::quality.fspaces(#计算性状空间的质量
+  sp_dist             = ml_fun_dist_mfd,
+  maxdim_pcoa         = 15,
+  deviation_weighting = "absolute",
+  fdist_scaling       = FALSE,
+  fdendro             = "average")
+round(fspaces_quality_ml$"quality_fspaces", 3) #查质量并决定选轴1-8
+sp_faxes_coord_ml <- fspaces_quality_ml$"details_fspaces"$"sp_pc_coord"#提取所有轴
+sp_faxes_coord_ml_phy <- fspaces_quality_ml_phy$"details_fspaces"$"sp_pc_coord"#提取所有轴
+
+ml_tr_faxes <- mFD::traits.faxes.cor(
+  sp_tr          = traits, #性状矩阵
+  sp_faxes_coord = sp_faxes_coord_ml[ , c("PC1", "PC2", "PC3", "PC4", "PC5", "PC6", "PC7", "PC8")], #选轴看轴和性状的相关性
+  plot           = TRUE)#是否画图
+ml_tr_faxes$"tr_faxes_stat"[which(ml_tr_faxes$"tr_faxes_stat"$"p.value" < 0.05), ]
+#调出结果列表的轴-性状的相关性，数值性状用线性回归，非数值变量用Kruskal-Wallis test 并输出eta2
+ml_tr_faxes$"tr_faxes_plot"#调出结果列表的图
+class(baskets_fruits_weights)#群落矩阵,类型必需是matrix，不能是数据框
+class(m01_plot)#原始格式是数据框
+
+#mfd 功能alpha计算####
+
+alpha.exclude<-which(rownames(m01_plot)%in%names(rowSums(m01_plot)[rowSums(m01_plot)<=8]))#需要排除的样方排序索引
+
+rownames(m01_plot[-alpha.exclude,])#排除检查
+alpha_fd_plot <- mFD::alpha.fd.multidim(
+  sp_faxes_coord   = sp_faxes_coord_ml[ , c("PC1", "PC2", "PC3", "PC4", "PC5", "PC6", "PC7", "PC8")], #选轴空间来代替原始性状空间
+  asb_sp_w         = as.matrix(m01_plot[-alpha.exclude,]),#样方矩阵,类型必需是matrix，不能是数据框
+  ind_vect         = c("fmpd", "fnnd","fdis",  "feve", "fric", "fdiv"),#用户指定计算哪些指标
+  scaling          = TRUE,
+  check_input      = TRUE,
+  details_returned = TRUE)
+
+View(rowSums(m01_comm)[rowSums(m01_comm)<=4])
+View(mFD::asb.sp.summary(asb_sp_w = as.matrix(m01_comm[-c(8),]))$"asb_tot_w"  )#看群落物种数会不会太少
+
+alpha_fd_comm <- mFD::alpha.fd.multidim(
+  sp_faxes_coord   = sp_faxes_coord_ml[ , 1:8], #选轴空间来代替原始性状空间
+  asb_sp_w         = as.matrix(m01_comm[-c(8),]),#群落矩阵,类型必需是matrix，不能是数据框
+  ind_vect         = c( "fmpd", "fnnd", "fdis","feve", "fric", "fdiv"),#用户指定计算哪些指标
+  scaling          = TRUE,
+  check_input      = TRUE,
+  details_returned = TRUE)
+#德钦杨群落物种数=4太少，少于pca轴的数量，无法计算凸多边形面积，需要去掉
+alpha_fd_vege$functional_diversity_indices$fdis
+View(mFD::asb.sp.summary(asb_sp_w = as.matrix(m01_vege))$"asb_tot_w"  )#看植被物种数会不会太少
+alpha_fd_vege <- mFD::alpha.fd.multidim(
+  sp_faxes_coord   = sp_faxes_coord_ml[ , 1:8], #选轴空间来代替原始性状空间
+  asb_sp_w         = as.matrix(m01_vege),#植被落矩阵,类型必需是matrix，不能是数据框
+  ind_vect         = c( "fmpd", "fnnd", "fdis","feve", "fric", "fdiv"),#用户指定计算哪些指标
+  scaling          = TRUE,
+  check_input      = TRUE,
+  details_returned = TRUE)
+
+par(mfrow=c(2,4))
+#mfd 功能beta计算####
+beta.exclude.row<-which(rownames(m01_plot)%in%names(rowSums(m01_plot)[rowSums(m01_plot)<=4]))#需要排除的样方排序索引
+beta.exclude.col<-which(colSums(m01_plot[-beta.exclude,])==0)#需要排除的物种排序索引
+
+beta_fd_plot <- mFD::beta.fd.multidim(
+  sp_faxes_coord   = sp_faxes_coord_ml[ , 1:4], #选轴空间来代替原始性状空间
+  asb_sp_occ       = as.matrix(m01_plot[-beta.exclude.row,-beta.exclude.col]),#样方矩阵,类型必需是matrix，不能是数据框
+  check_input      = TRUE,
+  beta_family      = c("Sorensen"),#可以选sorensen或jaccard
+  details_returned = TRUE)
+#Error in check.asb.sp.w.occ(asb_sp_occ) :   Some species are absent from all assemblages.
+#在去除了物种数极少的样方之后，有时候会连带把那几个样方中仅存的特有种也去掉，造成该物种在群落大矩阵中出现次数为0
+
+beta_fd_comm <- mFD::beta.fd.multidim(
+  sp_faxes_coord   = sp_faxes_coord_ml[ , 1:4], #选轴空间来代替原始性状空间
+  asb_sp_occ       = as.matrix(m01_comm[-c(8),]),#群落矩阵,类型必需是matrix，不能是数据框
+  check_input      = TRUE,
+  beta_family      = c("Sorensen"),#可以选sorensen或jaccard
+  details_returned = TRUE)
+
+beta_fd_vege <- mFD::beta.fd.multidim(
+  sp_faxes_coord   = sp_faxes_coord_ml[ , 1:4], #选轴空间来代替原始性状空间
+  asb_sp_occ       = as.matrix(m01_vege),#植被矩阵,类型必需是matrix，不能是数据框
+  check_input      = TRUE,
+  beta_family      = c("Sorensen"),#可以选sorensen或jaccard
+  details_returned = TRUE)
+
+beta_fd_vege$pairasb_fbd_indices#输出结果list取出的是三个beta多样性成分矩阵，只需要第一个diss
+beta_fd_vege$pairasb_fbd_indices$sor_diss#取出的矩阵是diss相异性 矩阵，和之前算的差一个“1-”
+beta_fd_vege$"details"$asb_FRic
+alpha_fd_vege$functional_diversity_indices$fric
+length(alpha_fd_vege$details$asb_vert_nm)
+
+#用mfd框架算beta.pd
+
+l.b.pd.n<-NULL
+for (i in 1:10) {
+  beta_pd <- mFD::beta.fd.multidim(
+    sp_faxes_coord   = sp_faxes_coord_ml_phy[ , 1:4], #选轴空间来代替原始性状空间
+    #All assemblages should have more species than number of functional axes
+    # Computing beta functional diversity in a6-dimensions space could exceed computing power 
+    #of your computer. Consider keeping only five dimensions
+    asb_sp_occ       = as.matrix(l.m01[[i]]),#群落矩阵,类型必需是matrix，不能是数据框
+    check_input      = TRUE,
+    beta_family      = c("Sorensen"),#可以选sorensen或jaccard
+    details_returned = TRUE)
+  
+  l.b.pd.n[[i]]<-(beta_pd$pairasb_fbd_indices)
+  #l.b.mfd[[i]]<-picante::comdist(l.m01no[[i]],ml_fun_dist,abundance.weighted=F)#样方/群落/植被-功能beta多样性-beta_mfd
+  #l.b.mnfd[[i]]<-picante::comdistnt(l.m01no[[i]],ml_fun_dist,abundance.weighted=F)
+}#批量计算功能beta多样性
+  
+beta_fd_vege <- mFD::beta.fd.multidim(
+  sp_faxes_coord   = sp_faxes_coord_ml_phy[ , 1:4], #选轴空间来代替原始性状空间
+  asb_sp_occ       = as.matrix(m01_vege),#植被矩阵,类型必需是matrix，不能是数据框
+  check_input      = TRUE,
+  beta_family      = c("Sorensen"),#可以选sorensen或jaccard
+  details_returned = TRUE)
+
+#提取功能beta多样性####
+beta.fd.plot<-(1-beta_fd_plot$pairasb_fbd_indices$sor_diss)
+beta.fd.comm<-(1-beta_fd_comm$pairasb_fbd_indices$sor_diss)
+beta.fd.vege<-(1-beta_fd_vege$pairasb_fbd_indices$sor_diss)
+
+
+
+vertice_plot<-verticelist(alpha_fd_plot$details$asb_vert_nm)
+vertice_comm<-verticelist(alpha_fd_comm$details$asb_vert_nm)
+vertice_vege<-verticelist(alpha_fd_vege$details$asb_vert_nm)
+
+less<-rowSums(columtomatrix(vertice_plot))
+more<-colSums(m01_plot)
+
+
+vertice.ratio.plot<-lessfillmore(rowSums(columtomatrix(vertice_plot)),colSums(m01_plot))
+vertice.ratio.comm<-lessfillmore(rowSums(columtomatrix(vertice_comm)),colSums(m01_comm))
+vertice.ratio.vege<-lessfillmore(rowSums(columtomatrix(vertice_vege)),colSums(m01_vege))
+
+m01<-m01_comm
+coord<-sp_faxes_coord_ml
+k<-8
+
+
+pc2_8.vertice.comm<-data
+
+pc2_8.vertice.plot<-pc.vertice(m01_plot,sp_faxes_coord_ml,8)
+pc2_8.vertice.comm<-pc.vertice(m01_comm,sp_faxes_coord_ml,8)
+pc2_8.vertice.vege<-pc.vertice(m01_vege,sp_faxes_coord_ml,8)
+
+
+
+avg_rlt2 <- as.data.frame(array(dim = c(dim(xinfo_comm)[1]+dim(xinfo_plot)[1]+dim(xinfo_vege)[1], 26)))#初始化结果矩阵
+avg_rlt2[,1:3]<-rbind(xinfo_plot[,2:4],xinfo_comm[,2:4],xinfo_vege[,2:4])#调取各尺度取样单元的海拔和上下限
+
+tempname<-xinfo_plot[,1]
+tempname[(length(tempname)+1):(length(tempname)+length(xinfo_comm[,1]))]<-xinfo_comm[,1]
+tempname[(length(tempname)+1):(length(tempname)+length(xinfo_vege[,1]))]<-xinfo_vege[,1]
+rownames(avg_rlt2)<-tempname#修改行名
+
+names(avg_rlt2)[1:3]<-c("mid","high","low")
+names(avg_rlt2)[4:26]<-names(for_averageif)[2:24]#修改列名
+
+#求各海拔范围气候均值####
+for (k in 2:length(for_averageif[1, ])) {#第一层控制计算的是第几个气候变量
+  for (i in 1:length(avg_rlt2[, 2]))#第二层控制第几个取样单元
+  {
+    avg_rlt2[i,(k+2)]<-mean(for_averageif[for_averageif[, 1] >= avg_rlt2[i, 3] & for_averageif[, 1] <= avg_rlt2[i, 2],k])
+  }
+}
+summary(prcomp(avg_rlt2[1:159,4:14],center = T,scale= T))#qiwen
+summary(prcomp(avg_rlt2[1:159,15:22],center = T,scale= T))#jiangshui
+summary(prcomp(avg_rlt2[160:210,4:14],center = T,scale= T))#qiwen
+summary(prcomp(avg_rlt2[160:210,15:22],center = T,scale= T))#jiangshui
+summary(prcomp(avg_rlt2[211:220,4:14],center = T,scale= T))#qiwen
+summary(prcomp(avg_rlt2[211:220,15:22],center = T,scale= T))#jiangshui
+
+summary(princomp(avg_rlt2[1:159,4:14]))#qiwen
+summary(princomp(avg_rlt2[1:159,15:22]))#qiwen
+summary(princomp(avg_rlt2[160:210,4:14]))#qiwen
+summary(princomp(avg_rlt2[160:210,15:22]))#qiwen
+summary(princomp(avg_rlt2[211:220,4:14]))#qiwen
+summary(princomp(avg_rlt2[211:220,15:22]))#qiwen
+
+cor(avg_rlt2[,25:26])
+cor.test(avg_rlt2[,25],avg_rlt2[,26])
+cor.sig(avg_rlt2[,4:26])
+
+T_PC1_PC2_HET_AREA<-cor.sig(cbind(Tem=predict(prcomp(avg_rlt2[,4:14],center = T,scale=T))[,1],P=predict(prcomp(avg_rlt2[,15:22],center = T,scale=T))[,1:2],HET=avg_rlt2[,25],AREA=avg_rlt2[,26]))
+HET_MDE_AREA<-cor.sig(cbind(MDE=pca_ed$MDE[1:159],HET=avg_rlt2[1:159,23],AREA=avg_rlt2[1:159,26]))
+write.csv(T_PC1_PC2_HET_AREA,"c:/d/r/meili2/T_PC1_PC2_HET_AREA_cor.sig.csv")
+write.csv(HET_MDE_AREA,"c:/d/r/meili2/HET_MDE_AREA_cor.sig.csv")
+
+xvalue<-scale(cbind(PRE=predict(prcomp(avg_rlt2[,15:22],center = T,scale=T))[,2],HET=avg_rlt2[,25],AREA=avg_rlt2[,26]))
+#样方-群落-植被尺度的总自变量
+
+xinfo_plot<-cbind(xinfo_plot[,1:4],xvalue[1:159,])
+xinfo_comm<-cbind(xinfo_comm[,1:4],xvalue[160:210,])
+xinfo_vege<-cbind(xinfo_vege[,1:4],xvalue[211:220,])
+#x自变量加入环境解释
+
+plot(xvalue)
+plot(avg_rlt2[1:159,1],avg_rlt2[1:159,26])
+plot(avg_rlt2[1:159,1],avg_rlt2[1:159,15])
+plot(avg_rlt2[,10:20])
+
+vegan::varpart(alpha_fd_vege$functional_diversity_indices$fmpd,xinfo_vege[,5],xinfo_vege[,6])
+plot(vegan::varpart(alpha_fd_vege$functional_diversity_indices$fmpd,xinfo_vege[,5],xinfo_vege[,6],xinfo_vege[,7]))
+plot(vegan::varpart(alpha_fd_comm$functional_diversity_indices$fmpd,xinfo_comm[-c(8),5],xinfo_comm[-c(8),6],xinfo_comm[-c(8),7]))
+plot(vegan::varpart(alpha_fd_plot$functional_diversity_indices$fmpd,xinfo_plot[-alpha.exclude,5],xinfo_plot[-alpha.exclude,6],xinfo_plot[-alpha.exclude,7]))
+
+summary(lm(alpha_fd_plot$functional_diversity_indices$feve~xinfo_plot[-alpha.exclude,5]+xinfo_plot[-alpha.exclude,6]+xinfo_plot[-alpha.exclude,7]))
+plot(cbind(feve=alpha_fd_plot$functional_diversity_indices$feve,xinfo_plot[-alpha.exclude,5:7]))
+
+
+
+
+#顶点分析####
+pc2_8<-pc2_8.vertice.plot
+spe_famlist<-unique(ml[,c(3,5)])
+vertice.plot<-vertice.filter(pc2_8.vertice.plot,unique(ml[,c(3,5)]))
+vertice.comm<-vertice.filter(pc2_8.vertice.comm,unique(ml[,c(3,5)]))
+vertice.vege<-vertice.filter(pc2_8.vertice.vege,unique(ml[,c(3,5)]))
+
+
+
+#mantel test ####
+plot(vegan::varpart(m01_plot,xinfo_plot[,5,drop=F],xinfo_plot[,6]))
+plot(vegan::varpart(
+  vegan::vegdist(m01_plot[-beta.exclude.row,],method = 'bray'),
+  vegan::vegdist(xinfo.plot.for.beta[,1],method = "euclidean"),
+  vegan::vegdist(xinfo.plot.for.beta[,2],method = "euclidean"),
+  vegan::vegdist(xinfo.plot.for.beta[,3],method = "euclidean"),
+  vegan::vegdist(xinfo.plot.for.beta[,4],method = "euclidean")
+))#y在前 x在后
+#varpart画韦恩图，可以检测2-4个x对一个y的贡献解释力
+
+cor.sig(xinfo.plot.for.beta159[, 2:4])
+summary(lm(
+  disttocolum(beta.fd.plot)~                            
+ #   disttocolum(dist(xinfo.plot.for.beta159[, 1]))+
+  disttocolum(dist(xinfo.plot.for.beta154[, 2]))+
+  disttocolum(dist(xinfo.plot.for.beta154[, 3]))+
+  disttocolum(dist(xinfo.plot.for.beta154[, 4]))
+))#y在前 x在后
+
+
+#准备beta多样性的环境变量####
+
+names(xinfo.plot.for.beta)<-c("ELE","PRE",  "HET",  "AREA")
+xinfo.plot.for.beta<-scale(xinfo.plot.for.beta)
+
+xinfo.comm.for.beta<-xinfo_comm[,c(2,5,6,7)]
+names(xinfo.comm.for.beta)<-c("ELE","PRE",  "HET",  "AREA")
+xinfo.comm.for.beta<-scale(xinfo.comm.for.beta)
+
+xinfo.vege.for.beta<-xinfo_vege[,c(2,5,6,7)]
+names(xinfo.vege.for.beta)<-c("ELE","PRE",  "HET",  "AREA")
+xinfo.vege.for.beta<-scale(xinfo.vege.for.beta)
+
+#物种beta和环境的mantel test####
+rst.s.p<-NULL#样方尺度的物种beta
+for (i in 1:4) {
+ temp<-vegan::mantel(vegan::vegdist(m01_plot[-beta.exclude.row,],method = 'bray'),vegan::vegdist(xinfo.plot.for.beta[,i],method = "euclidean"),permutations=999,method="pearson") 
+ rst.s.p<-rbind(rst.s.p,data.frame(x=colnames(xinfo.plot.for.beta)[i],stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+}#四个x分别单独做
+temp<-vegan::mantel(vegan::vegdist(m01_plot[-beta.exclude.row,],method = 'bray'),vegan::vegdist(xinfo.plot.for.beta,method = "euclidean"),permutations=999,method="pearson")
+rst.s.p<-rbind(rst.s.p,data.frame(x="All",stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+rst.s.p#最后rbind上所有因子合起来的
+
+
+rst.s.c<-NULL#群落尺度的物种beta
+for (i in 1:4) {
+  temp<-vegan::mantel(vegan::vegdist(m01_comm[,],method = 'bray'),vegan::vegdist(xinfo.comm.for.beta[,i],method = "euclidean"),permutations=999,method="pearson") 
+  rst.s.c<-rbind(rst.s.c,data.frame(x=colnames(xinfo.comm.for.beta)[i],stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+}#四个x分别单独做
+temp<-vegan::mantel(vegan::vegdist(m01_comm[,],method = 'bray'),vegan::vegdist(xinfo.comm.for.beta,method = "euclidean"),permutations=999,method="pearson")
+rst.s.c<-rbind(rst.s.c,data.frame(x="All",stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+rst.s.c#最后rbind上所有因子合起来的
+
+
+rst.s.v<-NULL#植被尺度的物种beta
+for (i in 1:4) {
+  temp<-vegan::mantel(vegan::vegdist(m01_vege[,],method = 'bray'),vegan::vegdist(xinfo.vege.for.beta[,i],method = "euclidean"),permutations=999,method="pearson") 
+  rst.s.v<-rbind(rst.s.v,data.frame(x=colnames(xinfo.vege.for.beta)[i],stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+}#四个x分别单独做
+temp<-vegan::mantel(vegan::vegdist(m01_vege[,],method = 'bray'),vegan::vegdist(xinfo.vege.for.beta,method = "euclidean"),permutations=999,method="pearson")
+rst.s.v<-rbind(rst.s.v,data.frame(x="All",stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+rst.s.v#最后rbind上所有因子合起来的
+
+#谱系beta和环境的mantel test####
+
+rst.p.p<-NULL#样方尺度的谱系beta
+for (i in 1:4) {
+  temp<-vegan::mantel(as.dist(as.matrix(beta.pd.plot)[-beta.exclude.row,-beta.exclude.row]),vegan::vegdist(xinfo.plot.for.beta[,i],method = "euclidean"),permutations=999,method="pearson") 
+  rst.p.p<-rbind(rst.p.p,data.frame(x=colnames(xinfo.plot.for.beta)[i],stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+}#四个x分别单独做
+temp<-vegan::mantel(as.dist(as.matrix(beta.pd.plot)[-beta.exclude.row,-beta.exclude.row]),vegan::vegdist(xinfo.plot.for.beta,method = "euclidean"),permutations=999,method="pearson")
+rst.p.p<-rbind(rst.p.p,data.frame(x="All",stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+rst.p.p#最后rbind上所有因子合起来的
+
+rst.p.c<-NULL#群落尺度的谱系beta
+for (i in 1:4) {
+  temp<-vegan::mantel(as.dist(as.matrix(beta.pd.comm)),vegan::vegdist(xinfo.comm.for.beta[,i],method = "euclidean"),permutations=999,method="pearson") 
+  rst.p.c<-rbind(rst.p.c,data.frame(x=colnames(xinfo.comm.for.beta)[i],stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+}#四个x分别单独做
+temp<-vegan::mantel(as.dist(as.matrix(beta.pd.comm)),vegan::vegdist(xinfo.comm.for.beta,method = "euclidean"),permutations=999,method="pearson")
+rst.p.c<-rbind(rst.p.c,data.frame(x="All",stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+rst.p.c#最后rbind上所有因子合起来的
+
+rst.p.v<-NULL#植被尺度的谱系beta
+for (i in 1:4) {
+  temp<-vegan::mantel(as.dist(as.matrix(beta.pd.vege)),vegan::vegdist(xinfo.vege.for.beta[,i],method = "euclidean"),permutations=999,method="pearson") 
+  rst.p.v<-rbind(rst.p.v,data.frame(x=colnames(xinfo.vege.for.beta)[i],stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+}
+temp<-vegan::mantel(as.dist(as.matrix(beta.pd.vege)),vegan::vegdist(xinfo.vege.for.beta,method = "euclidean"),permutations=999,method="pearson")
+rst.p.v<-rbind(rst.p.v,data.frame(x="All",stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+rst.p.v
+
+#功能beta和环境的mantel test####
+
+rst.f.p<-NULL#样方尺度的功能beta
+for (i in 1:4) {
+  temp<-vegan::mantel(beta.fd.plot,vegan::vegdist(xinfo.plot.for.beta[,i],method = "euclidean"),permutations=999,method="pearson") 
+  rst.f.p<-rbind(rst.f.p,data.frame(x=colnames(xinfo.plot.for.beta)[i],stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+}
+temp<-vegan::mantel(beta.fd.plot,vegan::vegdist(xinfo.plot.for.beta,method = "euclidean"),permutations=999,method="pearson")
+rst.f.p<-rbind(rst.f.p,data.frame(x="All",stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+rst.f.p
+
+rst.f.c<-NULL#群落尺度的功能beta
+for (i in 1:4) {
+  temp<-vegan::mantel(beta.fd.comm,vegan::vegdist(xinfo.comm.for.beta[-8,i],method = "euclidean"),permutations=999,method="pearson") 
+  rst.f.c<-rbind(rst.f.c,data.frame(x=colnames(xinfo.comm.for.beta)[i],stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+}
+temp<-vegan::mantel(beta.fd.comm,vegan::vegdist(xinfo.comm.for.beta[-8,],method = "euclidean"),permutations=999,method="pearson")
+rst.f.c<-rbind(rst.f.c,data.frame(x="All",stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+rst.f.c
+
+rst.f.v<-NULL#植被尺度的功能beta
+for (i in 1:4) {
+  temp<-vegan::mantel(beta.fd.vege,vegan::vegdist(xinfo.vege.for.beta[,i],method = "euclidean"),permutations=999,method="pearson") 
+  rst.f.v<-rbind(rst.f.v,data.frame(x=colnames(xinfo.vege.for.beta)[i],stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+}
+temp<-vegan::mantel(beta.fd.vege,vegan::vegdist(xinfo.vege.for.beta,method = "euclidean"),permutations=999,method="pearson")
+rst.f.v<-rbind(rst.f.v,data.frame(x="All",stat=round(temp[[3]],3),sig=round(temp[[4]],3)))
+rst.f.v
+#合并结果####
+rst<-cbind(rst.s.p[,2:3],rst.s.c[,2:3],rst.s.v[,2:3],
+      rst.p.p[,2:3],rst.p.c[,2:3],rst.p.v[,2:3],
+      rst.f.p[,2:3],rst.f.c[,2:3],rst.f.v[,2:3])
+t1<-rst[,c(1,3,5,7,9,11,13,15,17)]
+t2<-rst[,c(2,4,6,8,10,12,14,16,18)]
+t1[t2<0.05]<-paste(t1[t2<0.05],"*")
+rstnames<-c("plot level species beta",
+            "comm level species beta",
+            "vege level species beta",
+            "plot level phylogenetic beta",
+            "comm level phylogenetic beta",
+            "vege level phylogenetic beta",
+            "plot level functional beta",
+            "comm level functional beta",
+            "vege level functional beta"
+            )
+colnames(t1)<-rstnames
+rownames(t1)<-rst.f.c[,1]
+t1<-t(t1)
+t1
+write.csv(t1,"c:/D/r/meili2/jpg/mantel test.csv")
+
+#Significance(p)，p<0.05表明环境因子与微生物群落距离矩阵的相关性有统计学意义
+#single.mantel(m01_plot[-beta.exclude.row,], xinfo.plot.for.beta, sim.method="bray", correlation = "pearson", p.adjust.m= "fdr") # 多重比较
+#Mantel test 是对两个矩阵相关关系的检验，由Nathan Mantel在1976年提出。之所以抛开相关系数发展这样一种方法，
+#是因为相关系数只能处理两列数据之间的相关性，而在面对两个矩阵之间的相关性时就束手无策。Mantel检验专治这种不服。
+#不能把两个距离矩阵之间的相关性拉直成两列数据框来检验！
+
+
+
+
+#ses 系统发育的线性模型#####
+
+summary(lm(ses.alpha.mntd.comm[,6]~xinfo_comm[,5]+xinfo_comm[,6]+xinfo_comm[,7]))
+
+xinfo<-xinfo_plot
+ses<-ses.alpha.pd.plot[,6]
+
+
+#ses谱系模型选择和模型平均,一次和二次####
+
+t<-2
+modellist.plot.ses.pd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[1]][,2],C=l.clim3[[1]][,2]))),ses.alpha.pd.plot[,6],"plot.ses.pd",t)
+modellist.plot.ses.mpd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[1]][,2],C=l.clim3[[1]][,2]))),ses.alpha.mpd.plot[,6],"plot.ses.mpd",t)
+modellist.plot.ses.mntd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[1]][,2],C=l.clim3[[1]][,2]))),ses.alpha.mntd.plot[,6],"plot.ses.mntd",t)
+modellist.comm.ses.pd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[2]][,2],C=l.clim3[[2]][,2]))),ses.alpha.pd.comm[,6],"comm.ses.pd",t)
+modellist.comm.ses.mpd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[2]][,2],C=l.clim3[[2]][,2]))),ses.alpha.mpd.comm[,6],"comm.ses.mpd",t)
+modellist.comm.ses.mntd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[2]][,2],C=l.clim3[[2]][,2]))),ses.alpha.mntd.comm[,6],"comm.ses.mntd",t)
+modellist.vege.ses.pd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[3]][,2],C=l.clim3[[3]][,2]))),ses.alpha.pd.vege[,6],"vege.ses.pd",t)
+modellist.vege.ses.mpd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[3]][,2],C=l.clim3[[3]][,2]))),ses.alpha.mpd.vege[,6],"vege.ses.mpd",t)
+modellist.vege.ses.mntd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[3]][,2],C=l.clim3[[3]][,2]))),ses.alpha.mntd.vege[,6],"vege.ses.mntd",t)
+
+best.model.p<-rbind(#谱系ses alpha的最优模型
+  modellist.plot.ses.pd[[1]],  modellist.plot.ses.mpd[[1]],  modellist.plot.ses.mntd[[1]],
+  modellist.comm.ses.pd[[1]],  modellist.comm.ses.mpd[[1]],  modellist.comm.ses.mntd[[1]],
+  modellist.vege.ses.pd[[1]],  modellist.vege.ses.mpd[[1]],  modellist.vege.ses.mntd[[1]]
+)
+average.model.p<-cbind(#谱系ses alpha的模型平均结果
+  modellist.plot.ses.pd[[2]],  modellist.plot.ses.mpd[[2]],  modellist.plot.ses.mntd[[2]],
+  modellist.comm.ses.pd[[2]],  modellist.comm.ses.mpd[[2]],  modellist.comm.ses.mntd[[2]],
+  modellist.vege.ses.pd[[2]],  modellist.vege.ses.mpd[[2]],  modellist.vege.ses.mntd[[2]]
+)
+write.csv(best.model.p,"c:/d/r/meili2/table/best.model.p2.csv")
+write.csv(average.model.p,"c:/d/r/meili2/table/average.model.p2.csv")
+
+
+#ses功能模型选择和模型平均,一次####
+
+t<-2
+modellist.plot.ses.mfd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[1]][,2],C=l.clim3[[1]][,2]))),ses.alpha.mfd.plot[,6],"plot.ses.mfd",t)
+modellist.plot.ses.mnfd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[1]][,2],C=l.clim3[[1]][,2]))),ses.alpha.mnfd.plot[,6],"plot.ses.mnfd",t)
+
+modellist.comm.ses.mfd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[2]][,2],C=l.clim3[[2]][,2]))),ses.alpha.mfd.comm[,6],"comm.ses.mfd",t)
+modellist.comm.ses.mnfd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[2]][,2],C=l.clim3[[2]][,2]))),ses.alpha.mnfd.comm[,6],"comm.ses.mnfd",t)
+
+modellist.vege.ses.mfd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[3]][,2],C=l.clim3[[3]][,2]))),ses.alpha.mfd.vege[,6],"vege.ses.mfd",t)
+modellist.vege.ses.mnfd<-model.sel.avg3(as.data.frame(scale(data.frame(A=l.area3[[3]][,2],C=l.clim3[[3]][,2]))),ses.alpha.mnfd.vege[,6],"vege.ses.mnfd",t)
+
+best.model.f<-rbind(#谱系ses alpha的最优模型
+  #modellist.plot.ses.pd[[1]],
+  modellist.plot.ses.mfd[[1]],
+  modellist.plot.ses.mnfd[[1]],
+ # modellist.comm.ses.pd[[1]],
+  modellist.comm.ses.mfd[[1]],
+  modellist.comm.ses.mnfd[[1]],
+ # modellist.vege.ses.pd[[1]],
+  modellist.vege.ses.mfd[[1]],
+  modellist.vege.ses.mnfd[[1]]
+)
+average.model.f<-cbind(#谱系ses alpha的模型平均结果
+ # modellist.plot.ses.pd[[2]],
+  modellist.plot.ses.mfd[[2]],
+  modellist.plot.ses.mnfd[[2]],
+ # modellist.comm.ses.pd[[2]],
+  modellist.comm.ses.mfd[[2]],
+  modellist.comm.ses.mnfd[[2]],
+ # modellist.vege.ses.pd[[2]],
+  modellist.vege.ses.mfd[[2]],
+  modellist.vege.ses.mnfd[[2]]
+)
+write.csv(best.model.f,"c:/d/r/meili2/table/best.model.f2.csv")
+write.csv(average.model.f,"c:/d/r/meili2/table/average.model.f2.csv")
+
+
+#普通所有alpha模型选择和模型平均，一次####
+#必需基于xinfo.系列矩阵的结构！！！
+xinfo<-xinfo.comm
+term<-1
+
+norm.model.sel.avg<-function(xinfo,term){
+  masr1<-bmsr1<-NULL#model average、best model
+  
+  for (i in 6:11) {#xinfo.5-11列是alpha多样性,y
+    tempbmsr1<-tempmasr1<-NULL
+ # i<-5
+  ifelse(
+    term == 1,
+    glmd <- lm(xinfo[, i] ~ PRE + AREA + HET, data = xinfo),
+    glmd <- lm(xinfo[, i] ~ PRE + AREA + HET+I(PRE^2)+I(AREA^2)+I(HET^2), data = xinfo)#创建总模型
+  )
+
+  options(na.action = na.fail)#设置NA处理方法
+  dre.obj<-MuMIn::dredge(glmd, beta = "sd", evaluate = TRUE,rank = "AICc",extra = "adjR^2")#extra调出附加值r方
+  write.csv(dre.obj,"c:/d/temp.csv")#读出再读入，则可方便提取第一行最优模型
+  temp<-read.csv("c:/d/temp.csv",row.names = 1,header=T)
+  tempbmsr1<-rbind(tempbmsr1,temp[1,])#第一行最优模型
+  
+  mdav<-MuMIn::model.avg(object=dre.obj)#模型平均
+  s<-as.data.frame(summary(mdav)[[10]])#提取变量系数矩阵
+  s<-na.omit(s)#去掉截距
+  s[,6]<-row.names(s)#加一行变量名
+  s<-s[order(s[,6]),]#按变量名排序
+  for (i in 1:nrow(s)) {
+    if (s[i,5]>0.01&s[i,5]<0.05) {s[i,7]<-"*"}
+    if (s[i,5]>0.001&s[i,5]<0.01) {s[i,7]<-"**"}
+    if (s[i,5]>=0.00&s[i,5]<0.001) {s[i,7]<-"***"}
+    if (s[i,5]>0.05) {s[i,7]<-""}#添加显著度到第七行
+  }
+  yname<-names(xinfo)[i]
+  tempmasr1<-as.data.frame(paste(round(s[,1],3),s[,7],sep=""))
+  row.names(tempmasr1)<-row.names(s)
+  names(tempmasr1)<-yname
+  rownames(tempbmsr1)[1]<-yname
+  
+  ifelse(is.null(masr1),masr1<-tempmasr1,masr1<-cbind(masr1,tempmasr1))
+  ifelse(is.null(bmsr1),bmsr1<-tempbmsr1,bmsr1<-rbind(bmsr1,tempbmsr1))
+  
+
+  
+  }
+  rownames(bmsr1)<-names(xinfo)[6:11]
+  names(masr1)<-names(xinfo)[6:11]
+  return(list(bmsr1,masr1))
+}#ses输出数据的模型选择和模型平均
+names(xinfo.plot)<-names(xinfo.comm)<-names(xinfo.vege)
+bm1<-rbind(norm.model.sel.avg(xinfo.plot,1)[[1]],norm.model.sel.avg(xinfo.comm,1)[[1]],norm.model.sel.avg(xinfo.vege,1)[[1]])
+ma1<-rbind(norm.model.sel.avg(xinfo.plot,1)[[2]],norm.model.sel.avg(xinfo.comm,1)[[2]],norm.model.sel.avg(xinfo.vege,1)[[2]])
+bm2<-rbind(norm.model.sel.avg(xinfo.plot,2)[[1]],norm.model.sel.avg(xinfo.comm,2)[[1]],norm.model.sel.avg(xinfo.vege,2)[[1]])
+ma2<-rbind(norm.model.sel.avg(xinfo.plot,2)[[2]],norm.model.sel.avg(xinfo.comm,2)[[2]],norm.model.sel.avg(xinfo.vege,2)[[2]])
+write.csv(bm1,"c:/d/r/meili2/bestmodel 1 norm alpha.csv")
+write.csv(bm2,"c:/d/r/meili2/bestmodel 2 norm alpha.csv")
+write.csv(ma1,"c:/d/r/meili2/modelavg 1 norm alpha.csv")
+write.csv(ma2,"c:/d/r/meili2/modelavg 2 norm alpha.csv")
+
+#画图####
+xinfo.plot<-xinfo_plot[-alpha.exclude,c(2,5:7)]
+for (i in 1:7) {xinfo.plot<-cbind(xinfo.plot,alpha_fd_plot$functional_diversity_indices[[i]])}
+names(xinfo.plot)[5:11]<-names(alpha_fd_plot$functional_diversity_indices)[1:7]
+
+xinfo.plot.for.beta154<-xinfo_plot[-beta.exclude.row,c(2,5:7)]
+xinfo.plot.for.beta159<-xinfo_plot[,c(2,5:7)]
+xinfo.comm.for.beta51<-xinfo.comm<-xinfo_comm[,c(2,5:7)]
+
+xinfo.comm<-xinfo_comm[-c(8),c(2,5:7)]#50 !!!!!!50 !!!!!!50 !!!!!!50 !!!!!!50 !!!!!!50 !!!!!!
+for (i in 1:7) {xinfo.comm<-cbind(xinfo.comm,alpha_fd_comm$functional_diversity_indices[[i]])}
+names(xinfo.comm)[5:11]<-names(alpha_fd_comm$functional_diversity_indices)[1:7]
+
+xinfo.vege<-xinfo_vege[,c(2,5:7)]
+for (i in 1:7) {xinfo.vege<-cbind(xinfo.vege,alpha_fd_vege$functional_diversity_indices[[i]])}
+names(xinfo.vege)[5:11]<-names(alpha_fd_vege$functional_diversity_indices)[1:7]
+
+#集合所有alpha因变量和解释变量####
+xinfo.vege <-
+  data.frame(
+    xinfo.vege[, 1:11],
+    alpha.pd=alpha.pd.vege[,1],
+    alpha.mpd=alpha.mpd.vege,  
+    alpha.mntd=alpha.mntd.vege
+  )
+xinfo.comm <-
+  data.frame(
+    xinfo.comm[, 1:11],
+    alpha.pd=alpha.pd.comm[-c(8),1],
+    alpha.mpd=alpha.mpd.comm[-c(8)],  
+    alpha.mntd=alpha.mntd.comm[-c(8)]
+  )
+xinfo.plot <-
+  data.frame(
+    xinfo.plot[, 1:11],
+    alpha.pd=alpha.pd.plot[-alpha.exclude,1],
+    alpha.mpd=alpha.mpd.plot[-alpha.exclude],  
+    alpha.mntd=alpha.mntd.plot[-alpha.exclude]
+  )
+names(xinfo.plot)<-names(xinfo.comm)<-names(xinfo.vege)<-c("ELE","PRE","HET","AREA","SR","fdis","mfd","mnfd","feve","fric" ,"fdiv","pd","mpd","mntd")
+   #改名 
+beta.fd = beta_fd_vege
+    beta.mfd = beta.mfd.vege
+    beta.mnfd = beta.mnfd.vege
+
+#beta多样性四个距离矩阵的自变量####
+    d.v.ele<-dist(xinfo.vege[,1])
+    d.v.pre<-dist(xinfo.vege[,2])
+    d.v.het<-dist(xinfo.vege[,3])
+    d.v.area<-dist(xinfo.vege[,4])
+    
+    d.c.ele50<-dist(xinfo.comm[,1])
+    d.c.pre50<-dist(xinfo.comm[,2])
+    d.c.het50<-dist(xinfo.comm[,3])
+    d.c.area50<-dist(xinfo.comm[,4])
+
+    d.c.ele51<-dist(xinfo.comm.for.beta51[,1])
+    d.c.pre51<-dist(xinfo.comm.for.beta51[,2])
+    d.c.het51<-dist(xinfo.comm.for.beta51[,3])
+    d.c.area51<-dist(xinfo.comm.for.beta51[,4])
+    
+    d.p.ele154<-dist(xinfo.plot.for.beta154[,1])
+    d.p.pre154<-dist(xinfo.plot.for.beta154[,2])
+    d.p.het154<-dist(xinfo.plot.for.beta154[,3])
+    d.p.area154<-dist(xinfo.plot.for.beta154[,4])
+
+    d.p.ele159<-dist(xinfo.plot.for.beta159[,1])
+    d.p.pre159<-dist(xinfo.plot.for.beta159[,2])
+    d.p.het159<-dist(xinfo.plot.for.beta159[,3])
+    d.p.area159<-dist(xinfo.plot.for.beta159[,4])
+    
+#样方-群落-植被尺度下的功能ses.alpha.mfd mnfd####
+
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的功能ses.alpha.mfd mnfd",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27)
+
+par(mfrow=c(2,3),mar=c(4,5,5,0.5))
+ses.plot(xinfo.plot,ses.alpha.mfd.plot[-alpha.exclude,],"ses.mfd",scl.names[1],term=2)
+ses.plot(xinfo.comm,ses.alpha.mfd.comm[-c(8),],"ses.mfd",scl.names[2],term=2)
+ses.plot(xinfo.vege,ses.alpha.mfd.vege[,],"ses.mfd",scl.names[3],term=2)
+ses.plot(xinfo.plot,ses.alpha.mnfd.plot[-alpha.exclude,],"ses.mnfd",scl.names[1],term=2)
+ses.plot(xinfo.comm,ses.alpha.mnfd.comm[-c(8),],"ses.mnfd",scl.names[2],term=2)
+ses.plot(xinfo.vege,ses.alpha.mnfd.vege[,],"ses.mnfd",scl.names[3],term=2)
+par(mfrow=c(1,1))
+dev.off()
+
+#样方-群落-植被尺度下的系统发育ses.alpha.pd mpd mntd#####
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的系统发育ses.alpha.pd mpd mntd",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+
+par(mfrow=c(3,3),mar=c(4,5,5,0.5))
+
+ses.plot(xinfo_plot[,2:7],ses.alpha.pd.plot,"ses.pd","Plot level")
+ses.plot(xinfo_comm[,2:7],ses.alpha.pd.comm,"ses.pd","Community level")
+ses.plot(xinfo_vege[,2:7],ses.alpha.pd.vege,"ses.pd","Vegetation level")
+
+ses.plot(xinfo_plot[,2:7],ses.alpha.mpd.plot,"ses.mpd","Plot level")
+ses.plot(xinfo_comm[,2:7],ses.alpha.mpd.comm,"ses.mpd","Community level")
+ses.plot(xinfo_vege[,2:7],ses.alpha.mpd.vege,"ses.mpd","Vegetation level")
+
+ses.plot(xinfo_plot[,2:7],ses.alpha.mntd.plot,"ses.mntd","Plot level")
+ses.plot(xinfo_comm[,2:7],ses.alpha.mntd.comm,"ses.mntd","Community level")
+ses.plot(xinfo_vege[,2:7],ses.alpha.mntd.vege,"ses.mntd","Vegetation level")
+par(mfrow=c(1,1))
+dev.off()
+
+#物种alpha画图#####
+#样方、群落、植被尺度下的物种alpha sr####
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的物种alpha sr",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27/2)
+t<-2
+par(mfrow=c(1,3),mar=c(4,5,5,0.5))
+plot(xinfo.plot[,1],xinfo.plot[,5],pch=19,cex=2,xlab="Elevation (m)",ylab="Species richness",main="Plot level",cex.axis=1.5,cex.lab=2.5,cex.main=3)
+plot.trendl.pr(xinfo.plot[,1],xinfo.plot[,5],term=t)
+
+plot(xinfo.comm[,1],xinfo.comm[,5],pch=19,cex=2,xlab="Elevation (m)",ylab="Species richness",main="Community level",cex.axis=1.5,cex.lab=2.5,cex.main=3)
+plot.trendl.pr(xinfo.comm[,1],xinfo.comm[,5],term=t)
+
+plot(xinfo.vege[,1],xinfo.vege[,5],pch=19,cex=2,xlab="Elevation (m)",ylab="Species richness",main="Vegetation level",cex.axis=1.5,cex.lab=2.5,cex.main=3)
+plot.trendl.pr(xinfo.vege[,1],xinfo.vege[,5],term=t)
+par(mfrow=c(1,1))
+dev.off()
+scl.names<-c("Plot level","Community level","Vegetation level")
+#谱系alpha画图#####
+#样方、群落、植被尺度下的系统发育alpha pd mpd mntd#####
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的系统发育alpha pd mpd mntd",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27/2)
+t<-2#多项式次数
+par(mfrow=c(1,3),mar=c(4,5,5,0.5))
+beta.plot(xinfo_plot[,2],alpha.pd.plot[,1], xinfo_comm[,2],alpha.pd.comm[,1], xinfo_vege[,2],alpha.pd.vege[,1],
+          "Elevation (m)","pd",  term=t
+)#x1,y1,x2,y2,x3,y3,xname,yname,mainname
+beta.plot(xinfo_plot[,2],alpha.mpd.plot, xinfo_comm[,2],alpha.mpd.comm, xinfo_vege[,2],alpha.mpd.vege,   term=t,
+          "Elevation (m)","mpd"
+)
+beta.plot(xinfo_plot[,2],alpha.mntd.plot, xinfo_comm[,2],alpha.mntd.comm, xinfo_vege[,2],alpha.mntd.vege,   term=t,
+          "Elevation (m)","mntd"
+)
+
+par(mfrow=c(1,1))
+dev.off()
+
+#功能alpha画图#####
+pl<-function(x,y,yname){
+plot(x,y,ylim=c(min(y),1.1*max(y)),pch=19,cex.lab=2.5,cex.axis=1.5,xlab="Elevation (m)",ylab=yname)
+  plot.trendl.pr(x,y,term=2)
+}
+
+path<-paste("C:/D/r/meili2/jpg/功能多样性alpha-海拔",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27)
+
+par(mfrow=c(2,3),mar=c(4,5,5,0.5))
+
+pl(xinfo.plot$ELE,xinfo.plot$mfd,"mfd")
+pl(xinfo.plot$ELE,xinfo.plot$mnfd,"mnfd")
+pl(xinfo.plot$ELE,xinfo.plot$fric,"fric")
+pl(xinfo.plot$ELE,xinfo.plot$fdis,"fdis")
+pl(xinfo.plot$ELE,xinfo.plot$feve,"feve")
+pl(xinfo.plot$ELE,xinfo.plot$fdiv,"fdiv")
+dev.off()
+#样方、群落、植被尺度下的系统发育pd mpd mntd#####
+
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的功能alpha",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27)
+t<-2
+par(mfrow=c(2,3),mar=c(4,5,5,0.5))
+beta.plot(xinfo.plot[,1],xinfo.plot[,7], xinfo.comm[,1],xinfo.comm[,7],xinfo.vege[,1],xinfo.vege[,7],term=t,"Elevation (m)","mfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(xinfo.plot[,1],xinfo.plot[,8], xinfo.comm[,1],xinfo.comm[,8],xinfo.vege[,1],xinfo.vege[,8],term=t,"Elevation (m)","mnfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(xinfo.plot[,1],xinfo.plot[,6], xinfo.comm[,1],xinfo.comm[,6],xinfo.vege[,1],xinfo.vege[,6],term=t,"Elevation (m)","fdis")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(xinfo.plot[,1],xinfo.plot[,9], xinfo.comm[,1],xinfo.comm[,9],xinfo.vege[,1],xinfo.vege[,9],term=t,"Elevation (m)","feve")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(xinfo.plot[,1],xinfo.plot[,10], xinfo.comm[,1],xinfo.comm[,10],xinfo.vege[,1],xinfo.vege[,10],term=t,"Elevation (m)","fric")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(xinfo.plot[,1],xinfo.plot[,11], xinfo.comm[,1],xinfo.comm[,11],xinfo.vege[,1],xinfo.vege[,11],term=t,"Elevation (m)","fdiv")#x1,y1,x2,y2,x3,y3,xname,mainname
+par(mfrow=c(1,1))
+dev.off()
+
+
+#####
+plot(xinfo.comm)
+write.csv(cor.sig(xinfo.comm[,5:14]),"c:/d/r/meili2/所有alpha相关性矩阵.csv")
+
+path<-paste("C:/D/r/meili2/jpg/SR和其他alpha多样性相关性",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.5/2,height=8.27*1.5/2*3/2)
+
+par(mfrow=c(3,3))
+for (i in 6:14) {  plot(xinfo.plot[,5],xinfo.plot[,i],xlab="SR",ylab="",main =names(xinfo.plot)[i],pch=19,cex.main=2)}
+par(mfrow=c(1,1))
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/海拔和其他alpha多样性相关性",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.5/2,height=8.27*1.5/2*3/2)
+
+par(mfrow=c(3,3))
+for (i in 6:14) {  plot(xinfo.plot[,1],xinfo.plot[,i],xlab="Elevatioin (m)",ylab="",main =names(xinfo.plot)[i],pch=19,cex.main=2)}
+par(mfrow=c(1,1))
+dev.off()
+
+#alpha两两相关####
+path<-paste("C:/D/r/meili2/jpg/alpha两两相关",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.5,height=8.27*1.5)
+
+plot(xinfo.comm[,5:length(xinfo.comm[1,])])
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/sr-9个alpha多样性相关",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27*1.5)
+t<-1
+par(mfrow=c(3,3))
+for (i in 6:14) {
+  beta.plot(xinfo.plot[,5],xinfo.plot[,i],xinfo.comm[,5],xinfo.comm[,i],xinfo.vege[,5],xinfo.vege[,i],term=t,
+          "Species Richness",names(xinfo.comm)[i])#x1,y1,x2,y2,x3,y3,xname,mainname
+}
+par(mfrow=c(1,1))
+dev.off()
+
+
+x<-xinfo.plot[,5]
+  y<-xinfo.plot[,10]
+
+path<-paste("C:/D/r/meili2/jpg/sr-9个alpha多样性相关-plot",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27*1.5)
+t<-1
+par(mfrow=c(3,3))
+for (i in 6:14) { 
+  plot(xinfo.plot[,5],xinfo.plot[,i],xlab="Species Richness",ylab="",main=names(xinfo.comm)[i],cex.main=2,pch=19,cex.lab=1.5)
+  #cf.l(xinfo.plot[,5],xinfo.plot[,i])
+  plot.trendl.pr(xinfo.plot[,5],xinfo.plot[,i],lcol="black",position="rb")
+  }
+par(mfrow=c(1,1))
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/sr-9个alpha多样性对sr的SSE-plot",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27*1.5)
+t<-1
+par(mfrow=c(3,3))
+for (i in 6:14) { 
+x<-xinfo.plot[,5]
+y<-xinfo.plot[,i]
+o<-order(x)#排序
+pdc<-predict(lm(y[o]~x[o]),interval = "confidence")#预测值和置信区间上下限
+plot(x[o],y[o]-pdc[,1],xlab="Species Richness",ylab="SSE",
+     main=names(xinfo.plot)[i],cex.main=2,pch=19,cex.lab=1.5)
+segments(0,0,40,0,lty = 2)
+}
+par(mfrow=c(1,1))
+dev.off()
+#1个物种beta 3个尺度-四个自变量, 1图2*2####
+t<-data.frame(x=dtc(d.p.area159),y=beta.sr.plot,g="plot")
+t1<-data.frame(x=dtc(d.c.area51),y=beta.sr.comm,g="comm")
+a<-rbind(t,t1)
+summary(lm(y~x+x:g,data=a))[[4]][3,4]
+
+c(dtc(d.p.area159),dtc(d.c.area51))
+
+path<-paste("C:/D/r/meili2/jpg/物种beta多样性和四个自变量关系",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+par(mfrow=c(2,2))
+coef.comp(  
+  disttocolum(d.p.area159),  (beta.sr.plot),
+  disttocolum(d.c.area51),  (beta.sr.comm),
+  disttocolum(d.v.area),  (beta.sr.vege),  "Area distance","Beta.SR"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(  
+  disttocolum(d.p.area159),  (beta.sr.plot),
+  disttocolum(d.c.area51),  (beta.sr.comm),
+  disttocolum(d.v.area),  (beta.sr.vege),  "Area distance","Beta.SR"
+)#x1,y1,
+beta.plot(
+  disttocolum(d.p.het159),  (beta.sr.plot),
+  disttocolum(d.c.het51),  (beta.sr.comm),
+  disttocolum(d.v.het),  (beta.sr.vege),"Heterogeneity distance","Beta.SR"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(
+  disttocolum(d.p.pre159),  (beta.sr.plot),
+  disttocolum(d.c.pre51),  (beta.sr.comm),
+  disttocolum(d.v.pre),  (beta.sr.vege),"Precipitation distance","Beta.SR"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(
+  disttocolum(d.p.ele159),  (beta.sr.plot),
+  disttocolum(d.c.ele51),  (beta.sr.comm),
+  disttocolum(d.v.ele),  (beta.sr.vege),"Elevation distance","Beta.SR"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+
+par(mfrow=c(1,1))
+dev.off()
+
+#3个谱系beta 3个尺度-四个自变量，3个2*2####
+
+path<-paste("C:/D/r/meili2/jpg/beta.pd-四个自变量关系",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+par(mfrow=c(2,2))
+beta.plot(dtc(d.p.area159),  dtc(beta.pd.plot),  dtc(d.c.area51),  dtc(beta.pd.comm),  dtc(d.v.area),  dtc(beta.pd.vege),  
+          "Area distance","Beta.Pd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.het159),  dtc(beta.pd.plot),  dtc(d.c.het51),  dtc(beta.pd.comm),  dtc(d.v.het),  dtc(beta.pd.vege),
+          "Heterogeneity distance","Beta.Pd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.pre159),  dtc(beta.pd.plot),  dtc(d.c.pre51),  dtc(beta.pd.comm),  dtc(d.v.pre),  dtc(beta.pd.vege),
+          "Precipitation distance","Beta.Pd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(dist_plot),  dtc(beta.pd.plot),  dtc(dist_comm),  dtc(beta.pd.comm),  dtc(dist_vege),  dtc(beta.pd.vege),  
+  "Elevation distance","Beta.Pd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+par(mfrow=c(1,1))
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/beta.mpd-四个自变量关系",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+par(mfrow=c(2,2))
+beta.plot(dtc(d.p.area159),  dtc(beta.mpd.plot),  dtc(d.c.area51),  dtc(beta.mpd.comm),  dtc(d.v.area),  dtc(beta.mpd.vege),  
+          "Area distance","Beta.Mpd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.het159),  dtc(beta.mpd.plot),  dtc(d.c.het51),  dtc(beta.mpd.comm),  dtc(d.v.het),  dtc(beta.mpd.vege),
+          "Heterogeneity distance","Beta.Mpd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.pre159),  dtc(beta.mpd.plot),  dtc(d.c.pre51),  dtc(beta.mpd.comm),  dtc(d.v.pre),  dtc(beta.mpd.vege),
+          "Precipitation distance","Beta.Mpd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(dist_plot),  dtc(beta.mpd.plot),  dtc(dist_comm),  dtc(beta.mpd.comm),  dtc(dist_vege),  dtc(beta.mpd.vege),  
+          "Elevation distance","Beta.Mpd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+par(mfrow=c(1,1))
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/beta.mntd-四个自变量关系",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+par(mfrow=c(2,2))
+beta.plot(dtc(d.p.area159),  dtc(beta.mntd.plot),  dtc(d.c.area51),  dtc(beta.mntd.comm),  dtc(d.v.area),  dtc(beta.mntd.vege),  
+          "Area distance","Beta.Mntd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.het159),  dtc(beta.mntd.plot),  dtc(d.c.het51),  dtc(beta.mntd.comm),  dtc(d.v.het),  dtc(beta.mntd.vege),
+          "Heterogeneity distance","Beta.Mntd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.pre159),  dtc(beta.mntd.plot),  dtc(d.c.pre51),  dtc(beta.mntd.comm),  dtc(d.v.pre),  dtc(beta.mntd.vege),
+          "Precipitation distance","Beta.Mntd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(dist_plot),  dtc(beta.mntd.plot),  dtc(dist_comm),  dtc(beta.mntd.comm),  dtc(dist_vege),  dtc(beta.mntd.vege),  
+          "Elevation distance","Beta.Mntd"
+)#x1,y1,x2,y2,x3,y3,xname,mainname
+par(mfrow=c(1,1))
+dev.off()
+
+#3  功能beta 3个尺度的-四个自变量，3个2*2####
+
+path<-paste("C:/D/r/meili2/jpg/beta.pd-四个自变量关系",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+par(mfrow=c(2,2))
+beta.plot(dtc(d.p.area154),  dtc(beta.fd.plot),  dtc(d.c.area50),  dtc(beta.fd.comm),  dtc(d.v.area),  dtc(beta.fd.vege),  
+          "Area distance","Beta.Fd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.het154),  dtc(beta.fd.plot),  dtc(d.c.het50),  dtc(beta.fd.comm),  dtc(d.v.het),  dtc(beta.fd.vege),
+          "Heterogeneity distance","Beta.Fd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.pre154),  dtc(beta.fd.plot),  dtc(d.c.pre50),  dtc(beta.fd.comm),  dtc(d.v.pre),  dtc(beta.fd.vege),
+          "Precipitation distance","Beta.Fd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.ele154),  dtc(beta.fd.plot),  dtc(d.c.ele50),  dtc(beta.fd.comm),  dtc(d.v.ele),  dtc(beta.fd.vege),  
+          "Elevation distance","Beta.Fd")#x1,y1,x2,y2,x3,y3,xname,mainname
+par(mfrow=c(1,1))
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/beta.mfd-四个自变量关系",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+par(mfrow=c(2,2))
+beta.plot(dtc(d.p.area159),  dtc(beta.mfd.plot),  dtc(d.c.area51),  dtc(beta.mfd.comm),  dtc(d.v.area),  dtc(beta.mfd.vege),  
+          "Area distance","Beta.Mfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.het159),  dtc(beta.mfd.plot),  dtc(d.c.het51),  dtc(beta.mfd.comm),  dtc(d.v.het),  dtc(beta.mfd.vege),
+          "Heterogeneity distance","Beta.Mfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.pre159),  dtc(beta.mfd.plot),  dtc(d.c.pre51),  dtc(beta.mfd.comm),  dtc(d.v.pre),  dtc(beta.mfd.vege),
+          "Precipitation distance","Beta.Mfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.ele159),  dtc(beta.mfd.plot),  dtc(d.c.ele51),  dtc(beta.mfd.comm),  dtc(d.v.ele),  dtc(beta.mfd.vege),  
+          "Elevation distance","Beta.Mfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+par(mfrow=c(1,1))
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/beta.mnfd-四个自变量关系",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+par(mfrow=c(2,2))
+beta.plot(dtc(d.p.area159),  dtc(beta.mnfd.plot),  dtc(d.c.area51),  dtc(beta.mnfd.comm),  dtc(d.v.area),  dtc(beta.mnfd.vege),  
+          "Area distance","Beta.Mnfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.het159),  dtc(beta.mnfd.plot),  dtc(d.c.het51),  dtc(beta.mnfd.comm),  dtc(d.v.het),  dtc(beta.mnfd.vege),
+          "Heterogeneity distance","Beta.Mnfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.pre159),  dtc(beta.mnfd.plot),  dtc(d.c.pre51),  dtc(beta.mnfd.comm),  dtc(d.v.pre),  dtc(beta.mnfd.vege),
+          "Precipitation distance","Beta.Mnfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+beta.plot(dtc(d.p.ele159),  dtc(beta.mnfd.plot),  dtc(d.c.ele51),  dtc(beta.mnfd.comm),  dtc(d.v.ele),  dtc(beta.mnfd.vege),  
+          "Elevation distance","Beta.Mnfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+par(mfrow=c(1,1))
+dev.off()
+
+
+#尺度间回归系数比较####
+#1个物种beta 3个尺度-四个自变量, 1图2*2
+xypcv<-rbind(
+coef.comp(    disttocolum(d.p.area159),  (beta.sr.plot),
+  disttocolum(d.c.area51),  (beta.sr.comm),
+  disttocolum(d.v.area),  (beta.sr.vege),  "Area distance","Beta.SR"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(  disttocolum(d.p.het159),  (beta.sr.plot),
+  disttocolum(d.c.het51),  (beta.sr.comm),
+  disttocolum(d.v.het),  (beta.sr.vege),"Heterogeneity distance","Beta.SR"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(  disttocolum(d.p.pre159),  (beta.sr.plot),
+  disttocolum(d.c.pre51),  (beta.sr.comm),
+  disttocolum(d.v.pre),  (beta.sr.vege),"Precipitation distance","Beta.SR"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(  disttocolum(d.p.ele159),  (beta.sr.plot),
+  disttocolum(d.c.ele51),  (beta.sr.comm),
+  disttocolum(d.v.ele),  (beta.sr.vege),"Elevation distance","Beta.SR"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+
+coef.comp(dtc(d.p.area159),  dtc(beta.pd.plot),  dtc(d.c.area51),  dtc(beta.pd.comm),  dtc(d.v.area),  dtc(beta.pd.vege),  
+          "Area distance","Beta.Pd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.het159),  dtc(beta.pd.plot),  dtc(d.c.het51),  dtc(beta.pd.comm),  dtc(d.v.het),  dtc(beta.pd.vege),
+          "Heterogeneity distance","Beta.Pd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.pre159),  dtc(beta.pd.plot),  dtc(d.c.pre51),  dtc(beta.pd.comm),  dtc(d.v.pre),  dtc(beta.pd.vege),
+          "Precipitation distance","Beta.Pd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(dist_plot),  dtc(beta.pd.plot),  dtc(dist_comm),  dtc(beta.pd.comm),  dtc(dist_vege),  dtc(beta.pd.vege),  
+          "Elevation distance","Beta.Pd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+
+coef.comp(dtc(d.p.area159),  dtc(beta.mpd.plot),  dtc(d.c.area51),  dtc(beta.mpd.comm),  dtc(d.v.area),  dtc(beta.mpd.vege),  
+          "Area distance","Beta.Mpd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.het159),  dtc(beta.mpd.plot),  dtc(d.c.het51),  dtc(beta.mpd.comm),  dtc(d.v.het),  dtc(beta.mpd.vege),
+          "Heterogeneity distance","Beta.Mpd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.pre159),  dtc(beta.mpd.plot),  dtc(d.c.pre51),  dtc(beta.mpd.comm),  dtc(d.v.pre),  dtc(beta.mpd.vege),
+          "Precipitation distance","Beta.Mpd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(dist_plot),  dtc(beta.mpd.plot),  dtc(dist_comm),  dtc(beta.mpd.comm),  dtc(dist_vege),  dtc(beta.mpd.vege),  
+          "Elevation distance","Beta.Mpd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+
+coef.comp(dtc(d.p.area159),  dtc(beta.mntd.plot),  dtc(d.c.area51),  dtc(beta.mntd.comm),  dtc(d.v.area),  dtc(beta.mntd.vege),  
+          "Area distance","Beta.Mntd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.het159),  dtc(beta.mntd.plot),  dtc(d.c.het51),  dtc(beta.mntd.comm),  dtc(d.v.het),  dtc(beta.mntd.vege),
+          "Heterogeneity distance","Beta.Mntd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.pre159),  dtc(beta.mntd.plot),  dtc(d.c.pre51),  dtc(beta.mntd.comm),  dtc(d.v.pre),  dtc(beta.mntd.vege),
+          "Precipitation distance","Beta.Mntd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(dist_plot),  dtc(beta.mntd.plot),  dtc(dist_comm),  dtc(beta.mntd.comm),  dtc(dist_vege),  dtc(beta.mntd.vege),  
+          "Elevation distance","Beta.Mntd"
+),#x1,y1,x2,y2,x3,y3,xname,mainname
+
+coef.comp(dtc(d.p.area154),  dtc(beta.fd.plot),  dtc(d.c.area50),  dtc(beta.fd.comm),  dtc(d.v.area),  dtc(beta.fd.vege),  
+          "Area distance","Beta.Fd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.het154),  dtc(beta.fd.plot),  dtc(d.c.het50),  dtc(beta.fd.comm),  dtc(d.v.het),  dtc(beta.fd.vege),
+          "Heterogeneity distance","Beta.Fd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.pre154),  dtc(beta.fd.plot),  dtc(d.c.pre50),  dtc(beta.fd.comm),  dtc(d.v.pre),  dtc(beta.fd.vege),
+          "Precipitation distance","Beta.Fd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.ele154),  dtc(beta.fd.plot),  dtc(d.c.ele50),  dtc(beta.fd.comm),  dtc(d.v.ele),  dtc(beta.fd.vege),  
+          "Elevation distance","Beta.Fd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+
+coef.comp(dtc(d.p.area159),  dtc(beta.mfd.plot),  dtc(d.c.area51),  dtc(beta.mfd.comm),  dtc(d.v.area),  dtc(beta.mfd.vege),  
+          "Area distance","Beta.Mfd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.het159),  dtc(beta.mfd.plot),  dtc(d.c.het51),  dtc(beta.mfd.comm),  dtc(d.v.het),  dtc(beta.mfd.vege),
+          "Heterogeneity distance","Beta.Mfd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.pre159),  dtc(beta.mfd.plot),  dtc(d.c.pre51),  dtc(beta.mfd.comm),  dtc(d.v.pre),  dtc(beta.mfd.vege),
+          "Precipitation distance","Beta.Mfd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.ele159),  dtc(beta.mfd.plot),  dtc(d.c.ele51),  dtc(beta.mfd.comm),  dtc(d.v.ele),  dtc(beta.mfd.vege),  
+          "Elevation distance","Beta.Mfd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+
+coef.comp(dtc(d.p.area159),  dtc(beta.mnfd.plot),  dtc(d.c.area51),  dtc(beta.mnfd.comm),  dtc(d.v.area),  dtc(beta.mnfd.vege),  
+          "Area distance","Beta.Mnfd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.het159),  dtc(beta.mnfd.plot),  dtc(d.c.het51),  dtc(beta.mnfd.comm),  dtc(d.v.het),  dtc(beta.mnfd.vege),
+          "Heterogeneity distance","Beta.Mnfd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.pre159),  dtc(beta.mnfd.plot),  dtc(d.c.pre51),  dtc(beta.mnfd.comm),  dtc(d.v.pre),  dtc(beta.mnfd.vege),
+          "Precipitation distance","Beta.Mnfd"),#x1,y1,x2,y2,x3,y3,xname,mainname
+coef.comp(dtc(d.p.ele159),  dtc(beta.mnfd.plot),  dtc(d.c.ele51),  dtc(beta.mnfd.comm),  dtc(d.v.ele),  dtc(beta.mnfd.vege),  
+          "Elevation distance","Beta.Mnfd")#x1,y1,x2,y2,x3,y3,xname,mainname
+)
+
+
+
+
+
+
+#尺度间回归系数画图####
+
+path<-paste("C:/D/r/meili2/jpg/尺度间斜率比较",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69/2,height=8.27/2)
+plot(log10(abs(xypcv[,2])),type="no",ylim=c(-4.5,2.5),ylab="",main="Log10 of abselute value of coefficients")
+points(log10(abs(xypcv[,2])),col="gray",pch=19,type = "b")
+points(log10(abs(xypcv[,3])),col="steelblue",pch=19,type = "b")
+points(log10(abs(xypcv[,4])),col="orange",pch=19,type = "b")
+
+legend(
+  x = 20,y=2.5,
+  legend = c("Plot", "Community","Vegetation"),  # Legend texts
+  lty = c(1, 1,1),           # Line types
+  col = c("gray","steelblue","orange"),           # Line colors
+  lwd = 3,bty="n")   #bty="n"无边框
+
+dev.off()
+
+#质量性状比例随海拔画图####
+mratio<-trait_ratio(unique(ml[,c(16,17)]))#ml 9:16列,17海拔
+factorlevel<-as.data.frame(array(dim=c(8,2)))
+for (i in 9:16) {
+  factorlevel[i-8,1]<-paste(unique(ml[,i]),collapse = "/")
+  factorlevel[i-8,2]<-length(unique(ml[,i]))
+  
+}#获取分类性状类别数量
+
+
+mratio<-trait_ratio(unique(ml[,c(16,17)]))
+
+
+tt<-function(temp){
+  len<-c(3,4,6,12,15)
+  if ((length(temp[1,])-1)==len[1]) { par(mfrow=c(1,3)) }
+  if ((length(temp[1,])-1)==len[2]) { par(mfrow=c(2,2)) }
+  if ((length(temp[1,])-1)==len[3]) { par(mfrow=c(2,3)) }
+  if ((length(temp[1,])-1)==len[4]) { par(mfrow=c(4,3)) }
+  if ((length(temp[1,])-1)==len[5]) { par(mfrow=c(5,3)) }
+
+  for (i in 2:(length(temp[1,]))) {
+    trait_ratio.plot(temp[,c(1,i)])
+  plot.trendl.pr(temp[,1],temp[,i])  
+  }
+  par(mfrow=c(1,1))
+  
+  
+}#一键画图
+str(ml[,9:16])
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-分类-类群",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27/2)#11.69*8.27默认画2行3列合适
+tt(trait_ratio(unique(ml[,c(3,16,17)])[,2:3]))#3 Group 
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-分类-分布区",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27/2)#11.69*8.27默认画2行3列合适
+tt(trait_ratio(unique(ml[,c(3,15,17)])[,2:3]))#3 Areal_type
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-分类-性系统",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27/2)#11.69*8.27默认画2行3列合适
+tt(trait_ratio(unique(ml[,c(3,14,17)])[,2:3]))#3 Sexual_system 
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-分类-子实体",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)#11.69*8.27默认画2行3列合适
+tt(trait_ratio(unique(ml[,c(3,13,17)])[,2:3]))#6 Diaspore_dispersion_type
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-分类-传粉",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27/2)#11.69*8.27默认画2行3列合适
+tt(trait_ratio(unique(ml[,c(3,12,17)])[,2:3]))#3 Pollination_type  
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-分类-果实",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27*2.5)#11.69*8.27默认画2行3列合适
+tt(trait_ratio(unique(ml[,c(3,11,17)])[,2:3]))#15 Fruit_type  
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-分类-生活型",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*0.666,height=8.27)#11.69*8.27默认画2行3列合适
+tt(trait_ratio(unique(ml[,c(3,10,17)])[,2:3]))#4  Life_form 
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-分类-花色",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27*2)#11.69*8.27默认画2行3列合适
+tt(trait_ratio(unique(ml[,c(3, 9,17)])[,2:3]))#12 Flower_color 
+dev.off()
+
+
+#所有数量性状比例随海拔####
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-数量 叶长叶宽株高",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27/2)
+par(mfrow=c(1,3))
+trait_num.plot(ml[,c(17,6)],"Leaf Length (cm)")
+plot.trendl.pr(ml[,17],ml[,6],term = 2,lwidth=3)
+
+trait_num.plot(ml[,c(17,7)],"Leaf Width (cm)")
+plot.trendl.pr(ml[,17],ml[,7],term = 2,lwidth=3)
+
+trait_num.plot(ml[,c(17,8)],"Plant Maximun Height (cm)")
+plot.trendl.pr(ml[,17],ml[,8],term = 2,lwidth=3)
+
+par(mfrow=c(1,1))
+dev.off()
+
+#单独一个数量性状 分组画####
+lw<-3
+t<-2#拟合方程最高次数
+ca<-1.5
+cl<-1.5
+cm<-2
+yl<-"Trait value"
+path<-paste("C:/D/r/meili2/jpg/性状/性状-数量分组-叶长",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+
+par(mfrow=c(2,3))
+plot(ml[ml[,10]=="Herb",c(17)],ml[ml[,10]=="Herb",c(6)],main="Herb",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,10]=="Herb",17],ml[ml[,10]=="Herb",6],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,10]=="Tree",c(17)],ml[ml[,10]=="Tree",c(6)],main="Tree",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,10]=="Tree",17],ml[ml[,10]=="Tree",6],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,10]=="Shrub",c(17)],ml[ml[,10]=="Shrub",c(6)],main="Shrub",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,10]=="Shrub",17],ml[ml[,10]=="Shrub",6],term = t,lwidth=lw,lcol="steelblue")
+
+plot(ml[ml[,16]=="Angiosperms",c(17)],ml[ml[,16]=="Angiosperms",c(6)],main="Angiosperms",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,16]=="Angiosperms",17],ml[ml[,16]=="Angiosperms",6],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,16]=="Gymnosperms",c(17)],ml[ml[,16]=="Gymnosperms",c(6)],main="Gymnosperms",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,16]=="Gymnosperms",17],ml[ml[,16]=="Gymnosperms",6],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,16]=="Ferns and lycophytes",c(17)],ml[ml[,16]=="Ferns and lycophytes",c(6)],main="Ferns and lycophytes",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,16]=="Ferns and lycophytes",17],ml[ml[16]=="Ferns and lycophytes",6],term = t,lwidth=lw,lcol="steelblue")
+par(mfrow=c(1,1))
+dev.off()
+
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-数量分组-叶宽",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+t<-2#拟合方程最高次数
+
+par(mfrow=c(2,3))
+plot(ml[ml[,10]=="Herb",c(17)],ml[ml[,10]=="Herb",c(7)],main="Herb",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,10]=="Herb",17],ml[ml[,10]=="Herb",7],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,10]=="Tree",c(17)],ml[ml[,10]=="Tree",c(7)],main="Tree",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,10]=="Tree",17],ml[ml[,10]=="Tree",7],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,10]=="Shrub",c(17)],ml[ml[,10]=="Shrub",c(7)],main="Shrub",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,10]=="Shrub",17],ml[ml[,10]=="Shrub",7],term = t,lwidth=lw,lcol="steelblue")
+
+plot(ml[ml[,16]=="Angiosperms",c(17)],ml[ml[,16]=="Angiosperms",c(7)],main="Angiosperms",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,16]=="Angiosperms",17],ml[ml[,16]=="Angiosperms",7],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,16]=="Gymnosperms",c(17)],ml[ml[,16]=="Gymnosperms",c(7)],main="Gymnosperms",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,16]=="Gymnosperms",17],ml[ml[,16]=="Gymnosperms",7],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,16]=="Ferns and lycophytes",c(17)],ml[ml[,16]=="Ferns and lycophytes",c(7)],main="Ferns and lycophytes",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,16]=="Ferns and lycophytes",17],ml[ml[16]=="Ferns and lycophytes",7],term = t,lwidth=lw,lcol="steelblue")
+par(mfrow=c(1,1))
+dev.off()
+
+
+
+
+path<-paste("C:/D/r/meili2/jpg/性状/性状-数量分组-株高",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+
+t<-2#拟合方程最高次数
+par(mfrow=c(2,3))
+plot(ml[ml[,10]=="Herb",c(17)],ml[ml[,10]=="Herb",c(8)],main="Herb",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,10]=="Herb",17],ml[ml[,10]=="Herb",8],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,10]=="Tree",c(17)],ml[ml[,10]=="Tree",c(8)],main="Tree",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,10]=="Tree",17],ml[ml[,10]=="Tree",8],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,10]=="Shrub",c(17)],ml[ml[,10]=="Shrub",c(8)],main="Shrub",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,10]=="Shrub",17],ml[ml[,10]=="Shrub",8],term = t,lwidth=lw,lcol="steelblue")
+
+plot(ml[ml[,16]=="Angiosperms",c(17)],ml[ml[,16]=="Angiosperms",c(8)],main="Angiosperms",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,16]=="Angiosperms",17],ml[ml[,16]=="Angiosperms",8],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,16]=="Gymnosperms",c(17)],ml[ml[,16]=="Gymnosperms",c(8)],main="Gymnosperms",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,16]=="Gymnosperms",17],ml[ml[,16]=="Gymnosperms",8],term = t,lwidth=lw,lcol="steelblue")
+plot(ml[ml[,16]=="Ferns and lycophytes",c(17)],ml[ml[,16]=="Ferns and lycophytes",c(8)],main="Ferns and lycophytes",xlab = "Elevation (m)",ylab=yl,pch=19,cex.main=cm,cex.lab=cl,cex.axis=ca)
+plot.trendl.pr(ml[ml[,16]=="Ferns and lycophytes",17],ml[ml[16]=="Ferns and lycophytes",8],term = t,lwidth=lw,lcol="steelblue")
+par(mfrow=c(1,1))
+dev.off()
+#title("Leaf Length (cm)",outer = T,adj=0.5,line = -0.15)#outer = T放到整个图版的外围
+#整个图版添加title，而不是分图，分图在plot里用main
+
+
+#构造同尺度下各beta多样性列表####
+betalist.vege<-NULL
+betalist.vege[[1]]<-dist(m01_vege)
+betalist.vege[[2]]<-beta.pd.vege
+betalist.vege[[3]]<-beta.mpd.vege
+betalist.vege[[4]]<-beta.mntd.vege
+betalist.vege[[5]]<-beta.fd.vege
+betalist.vege[[6]]<-beta.mfd.vege
+betalist.vege[[7]]<-beta.mnfd.vege
+names(betalist.vege)<-c("beta.sr.vege","beta.pd.vege","beta.mpd.vege","beta.mntd.vege","beta.fd.vege","beta.mfd.vege","beta.mnfd.vege")
+
+betalist.comm<-NULL
+betalist.comm[[1]]<-dist(m01_comm[-c(8),-c(8)])
+betalist.comm[[2]]<-as.dist(as.matrix(beta.pd.comm)[-8,-8])#转成矩阵去掉多余的行之后再转成距离
+betalist.comm[[3]]<-as.dist(as.matrix(beta.mpd.comm)[-8,-8])
+betalist.comm[[4]]<-as.dist(as.matrix(beta.mntd.comm)[-8,-8])
+betalist.comm[[5]]<-beta.fd.comm
+betalist.comm[[6]]<-as.dist(as.matrix(beta.mfd.comm)[-8,-8])
+betalist.comm[[7]]<-as.dist(as.matrix(beta.mnfd.comm)[-8,-8])
+names(betalist.comm)<-c("beta.sr.comm","beta.pd.comm","beta.mpd.comm","beta.mntd.comm","beta.fd.comm","beta.mfd.comm","beta.mnfd.comm")
+
+
+betalist.plot<-NULL
+betalist.plot[[1]]<-dist(m01_plot[-beta.exclude.row,-beta.exclude.row])
+betalist.plot[[2]]<-as.dist(as.matrix(beta.pd.plot)[-beta.exclude.row,-beta.exclude.row])#转成矩阵去掉多余的行之后再转成距离
+betalist.plot[[3]]<-as.dist(as.matrix(beta.mpd.plot)[-beta.exclude.row,-beta.exclude.row])
+betalist.plot[[4]]<-as.dist(as.matrix(beta.mntd.plot)[-beta.exclude.row,-beta.exclude.row])
+betalist.plot[[5]]<-beta.fd.plot
+betalist.plot[[6]]<-as.dist(as.matrix(beta.mfd.plot)[-beta.exclude.row,-beta.exclude.row])
+betalist.plot[[7]]<-as.dist(as.matrix(beta.mnfd.plot)[-beta.exclude.row,-beta.exclude.row])
+names(betalist.plot)<-c("beta.sr.plot","beta.pd.plot","beta.mpd.plot","beta.mntd.plot","beta.fd.plot","beta.mfd.plot","beta.mnfd.plot")
+
+#各beta多样性之间的mantel####
+mantel.rst<-function(list){
+  #list<-betalist.comm
+mrst<-NULL#mantel result
+for (i in 1:(length(list)-1)) {
+  for (j in (i+1):length(list)) {
+    temp1<-list[[i]]
+      temp2<-list[[j]]
+    temp<-vegan::mantel(temp1,temp2,permutations=9999,method="pearson") 
+    ifelse(
+      round(temp[[4]],3)<=0.05,
+      mrst<-rbind(mrst,data.frame(beta1=names(list)[i],beta2=names(list)[j],stat=paste(round(temp[[3]],3),"*"))),
+      mrst<-rbind(mrst,data.frame(beta1=names(list)[i],beta2=names(list)[j],stat=round(temp[[3]],3)))
+    )
+    }
+  }
+ return(mrst) 
+}#输入betalist,提取各beta多样性之间mantel test
+write.csv(columtomatrix(mantel.rst(betalist.plot)),"c:/d/r/meili2/jpg/beta.cor.plot.csv")
+write.csv(columtomatrix(mantel.rst(betalist.comm)),"c:/d/r/meili2/jpg/beta.cor.comm.csv")
+write.csv(columtomatrix(mantel.rst(betalist.vege)),"c:/d/r/meili2/jpg/beta.cor.vege.csv")
+#sr.beta和其他beta相关性####
+path<-paste("C:/D/r/meili2/jpg/beta之间关系",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27/2)
+t<-1
+par(mfrow=c(1,2))
+beta.plot(beta.sr.plot,dtc(beta.pd.plot),beta.sr.comm,dtc(beta.pd.comm),beta.sr.vege,dtc(beta.pd.vege),"Beta.SR","Beta.PD",term=t)
+beta.plot(1-disttocolum(vegan::vegdist(m01_plot[-beta.exclude.row,])),dtc(beta.fd.plot),
+          1-disttocolum(vegan::vegdist(m01_comm[-c(8),])),dtc(beta.fd.comm),
+          1-disttocolum(vegan::vegdist(m01_vege)),dtc(beta.fd.vege),"Beta.SR","Beta.FD",term=t)
+par(mfrow=c(1,1))
+dev.off()
+#plot(1-disttocolum(vegan::vegdist(m01_plot)),disttocolum(beta.pd.plot),col="blue")
+#验证
+
+#测试内容####
+
+a<-c("a","b","c","d","e")
+b<-c("a","c","e")
+a%in%b
+b%in%a
+
+lowess()
+test<-data.frame(sp1=c(0,1,1,0),
+           sp2=c(1,1,1,1),
+           sp3=c(1,1,0,1),
+           sp4=c(1,0,1,0)
+             )
+test0<-data.frame(
+  sp1 = c(0, 1, 1, 0, 1, 1, 0, 1),
+  sp2 = c(1, 1, 1, 1, 0, 1, 0, 0),
+  sp3 = c(1, 1, 0, 1, 0, 1, 0, 1),
+  sp4 = c(1, 0, 1, 0, 1, 0, 0, 1)
+)
+
+
+rownames(test)<-c("p1","p2","p3","p4")
+
+
+t1<-proc.time()
+temp<-sorensen1(m01_plot)
+t2<-proc.time()
+t2-t1
+
+t1<-proc.time()
+temp<-sorensen2(m01_plot)
+t2<-proc.time()
+t2-t1
+
+remove(temp)
+
+xf<-c(1:20)
+y<-c(2,3,4,5,1,8,9,10,6,7,14,15,11,12,13,20,16,17,18,19)
+plot(x,y,yaxs="i",xaxs="i",ylim=c(0,21),xlim=c(0,21),pch=19,col="steelblue")#坐标轴参数
+grid(nx=11,ny=11)
+grid(col="black")
+points(x,x,pch=19,col="orange")
+points(x,y,pch=19,col="steelblue")
+points(10.5,10.5,pch=19,col="black")
+n<-5
+x<-data.frame(x)
+rollup<-data.frame(low=(x[x%%5==0,]-x[x%%5==0,]/n+1),high=(x[x%%5==0,]))
+x[x%%5==0,]->temp1
+x[x%%5==0,]-x[x%%5==0,]/n+1->temp2
+temp3<-temp1[1]
+for (i in 2:(n-1)) {
+  temp3[(length(temp3)+1):(length(temp3)+length(temp2[i]:temp1[i]))]<-temp2[i]:temp1[i]
+ # temp3<-cbind(temp3,)
+}
+x>=(x[x%%5==0,]-x[x%%5==0,]/n+1)&x<=(x[x%%5==0,])
+x>=temp2[ceiling(x/5)[,1]]&x<=temp1[ceiling(x/5)[,1]]
+
+
+rollup  <-data.frame(low=(x[x%%5==0,]-x[x%%5==0,]/n+1),high=(x[x%%5==0,]))#提前区间
+rolldown<-data.frame(low=(x[x%%5==0,]-n+1),high=(x[x%%5==0,]-x[x%%5==0,]/n))#延后区间
+
+orderup  <-data.frame(low=(x[x%%5==0,]-n+1),high=(x[x%%5==0,]+x[x%%5==0,]/n-n))#提前新顺序
+orderdown<-data.frame(low=(x[x%%5==0,]+x[x%%5==0,]/n-n+1),high=(x[x%%5==0,]))#延后新顺序
+  
+x>=rollup  [ceiling(x/5)[,1],1]&x<=rollup  [ceiling(x/5)[,1],2]
+x>=rolldown[ceiling(x/5)[,1],1]&x<=rolldown[ceiling(x/5)[,1],2]
+xx<-data.frame(x,x)
+xx[low,2]<-((orderup[ceiling(x/5)[,1],1]):(orderup[ceiling(x/5)[,1],2]))
+xx[x>=rollup  [ceiling(x/5)[,1],1]&x<=rollup  [ceiling(x/5)[,1],2],2]<-((orderup[ceiling(x/5)[,1],1]):(orderup[ceiling(x/5)[,1],2]))
+xx[x>=rollup  [ceiling(x/5)[,1],1]&x<=rollup  [ceiling(x/5)[,1],2],2]<-low[x>=rollup  [ceiling(x/5)[,1],1]&x<=rollup  [ceiling(x/5)[,1],2]]
+
+low<-orderup[ceiling(x/5)[,1],1]
+high<-orderup[ceiling(x/5)[,1],2]
+orderlist<-low[x%%5==0]<-high[x%%5==0]
+ma<-matrix(orderup[,1],ncol=5,nrow=4)
+ma[,5]<-orderup[,2]
+
+up  <-x>=rollup  [ceiling(x/5)[,1],1]&x<=rollup  [ceiling(x/5)[,1],2]
+down<-x>=rolldown[ceiling(x/5)[,1],1]&x<=rolldown[ceiling(x/5)[,1],2]
+
+xx[up,2]  <-(orderup  [,1][ceiling(x/5)[,1]]+x-rollup  [ceiling(x/5)[,1],1])[up]
+xx[down,2]<-(orderdown[,1][ceiling(x/5)[,1]]+x-rolldown[ceiling(x/5)[,1],1])[down]
+
+
+seq(11,13,by=1)
+seq(11,13,length=1)
+
+xx[ 5: 5,2]<-orderup[1,1]:orderup[1,2]
+xx[ 9:10,2]<-orderup[2,1]:orderup[2,2]
+xx[13:15,2]<-orderup[3,1]:orderup[3,2]
+xx[17:20,2]<-orderup[4,1]:orderup[4,2]
+ma<-matrix(1:20, nrow=4, ncol=5,byrow = TRUE)
+ma%%5==0
+x>=rollup  [ceiling(x/5)[,1],1]&x<=rollup  [ceiling(x/5)[,1],2]
+ma>=rollup  [ceiling(ma/5)[,],1]&ma<=rollup  [ceiling(ma/5)[,],2]
+
+data<-NULL#sorensen性能测试
+for (i in seq(10,50,by=10)) {
+t1=proc.time()
+sor1<-sorensen1(m01_comm[1:i,])
+t2=proc.time()
+
+t3=proc.time()
+sor2<-sorensen2(m01_comm[1:i,])
+t4=proc.time()
+
+t5=proc.time()
+sor3<-sorensen3(m01_comm[1:i,])
+t6=proc.time()
+data<-rbind(data,cbind(i,(t2-t1)[3],(t4-t3)[3],(t6-t5)[3]))
+}
+
+plot(data[,1],data[,2],pch=19,col="black",ylim=c(-5,70),xlab = "群落数量 n",ylab="计算耗时 / 秒")
+points(data[,1],data[,3],pch=19,col="orange")
+points(data[,1],data[,4],pch=19,col="steelblue")
+
+plot.trendl (data[,1],data[,2],"black",2,2,"lt")
+plot.trendl (data[,1],data[,3],"orange",2,1,"lt")
+plot.trendl (data[,1],data[,4],"steelblue",2,1,"lt")
+
+
+t<-proc.time()
+temp<-vegan::vegdist(m01_plot)
+proc.time()-t
+
+t<-proc.time()
+temp<-sorensen3(m01_plot)
+proc.time()-t
+y<-vegan::vegdist(m01_vege)
+d2<-vegan::vegdist(xinfo.vege[,2:4],method = "euclidean")
+vegan::mantel(d1,d2,permutations=999,method="pearson")
+
+
+sor1[order(sor1[,1]),1]
+  sor2[order(sor2[,1]),1]==sor2[order(sor2[,1]),1]
+
+dim(m01_comm)
+
+test<-NULL
+for (i in 1:100) {  test<-cbind(test,sample(c(0,1),50,replace = T))}
+dim(test)
+rownames(test)<-paste("p",1:50,sep="")
+
+plot(1:10,c(1,6,7,11,12,13,16,17,18,19),pch=19,xlim=c(0,11),ylim=c(0,20),yaxs="i",xaxs="i")
+grid(nx=11,ny=20)
+
+
+test<-data.frame(sp1=c(0,1,1,0),
+                 sp2=c(1,1,1,1),
+                 sp3=c(1,1,0,1),
+                 sp4=c(1,0,1,0)
+)
+sorensen1(test)
+
+
+data("phylocom")#library(picante)
+phylocom$sample
+phylocom$traits
+phylocom$phylo
+
+
+test<-data.frame(factor(unique(ml[,c(3,12)])[,2]),factor(unique(ml[,c(3,13)])[,2]))
+test<-data.frame(as.numeric(test[,1]),as.numeric(test[,2]))
+rownames(test)<-unique(ml[,3])
+#rownames(test)<-rownames(m01_plot_)
+
+colnames(test)<-colnames(ml[,12:13])
+head(test)
+
+par(mfrow=c(1,2))
+
+for (i in 1:length(test[1,])) {
+  plot(ml.tree$scenario.3, show.tip.label=T, main=names(test)[i],cex = 0.2)
+  tiplabels(pch=22, col=colvec[test[,i]+1], bg=colvec[test[,i]+1], cex=1.5)
+  rect(600,400,700,410,col=colvec[test[,i]+1])
+                # Line width
+}
+par(mfrow=c(1,1))
+
+plot(1,1,col=1.5,pch=19,xlim=c(0,21),ylim=c(0,21)) 
+for (i in 1:15) {
+ points(i,i,col=colvec[i],pch=19,xlim=c(0,21),ylim=c(0,21),cex=3) 
+}
+
+?plot
+rect(0,0,10,10,col="red")
+colvec<-c("aquamarine","hotpink","skyblue","orange","gray50",
+          "deeppink","gold","orchid","blue","red",
+          "green","black","coral1","purple","yellowgreen")
+
+#计算ses.beta.mntd####
+#beta.mntd.plot<-picante::comdistnt(m01_plot_,ml_phy_dist,abundance.weighted=F)
+
+
+t1<-proc.time()
+ses.beta.mntd.plot.999<-ses.beta.mntd(m01_plot_,ml_phy_dist)#99-1554s,999-178090s
+proc.time()-t1
+
+t1<-proc.time()
+ses.beta.mntd.comm.999<-ses.beta.mntd(m01_comm_,ml_phy_dist)#99-1554s
+proc.time()-t1
+
+t1<-proc.time()
+ses.beta.mntd.vege.999<-ses.beta.mntd(m01_vege_,ml_phy_dist)#65s1950s
+proc.time()-t1
+write.csv(ses.beta.mntd.plot.999,"c:/d/test1.csv")
+
+t1<-proc.time()
+ses.beta.mpd.plot.999<-ses.beta.mpd(m01_plot_,ml_phy_dist)#11250s
+proc.time()-t1
+t1<-proc.time()
+ses.beta.mpd.comm<-ses.beta.mpd(m01_comm_,ml_phy_dist)#1097s
+proc.time()-t1
+t1<-proc.time()
+ses.beta.mpd.vege<-ses.beta.mpd(m01_vege_,ml_phy_dist)#53s
+proc.time()-t1
+
+
+
+#样方-群落-植被尺度下的系统发育beta.nti beta.nri海拔距离画图####
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的系统发育beta.nti beta.nri海拔距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27/1)
+par(mfrow=c(2,3),mar=c(4,5,5,0.5))
+ses.beta.plot(disttocolum(dist_plot),ses.beta.mntd.plot.999[,6],yname = "ses.beta.mntd",main="Plot level",term=1)
+ses.beta.plot(disttocolum(dist_comm),ses.beta.mntd.comm.999[,6],yname = "ses.beta.mntd",main="Community level",term=1)
+ses.beta.plot(disttocolum(dist_vege),ses.beta.mntd.vege.999[,6],yname = "ses.beta.mntd",main="Vegetation level",term=1)
+
+ses.beta.plot(disttocolum(dist_plot),ses.beta.mpd.plot.999[,6],yname = "ses.beta.mpd",main="Plot level",term=1)
+ses.beta.plot(disttocolum(dist_comm),ses.beta.mpd.comm[,6],yname = "ses.beta.mpd",main="Community level",term=1)
+ses.beta.plot(disttocolum(dist_vege),ses.beta.mpd.vege[,6],yname = "ses.beta.mpd",main="Vegetation level",term=1)
+par(mfrow=c(1,1))
+dev.off()
+
+#beta.nti海拔画图####
+
+test<-ses.beta.mntd.plot.999[,c(1,2,6)]
+head(test)
+dim(test)
+
+test<-rbind(test,data.frame(X=test[,2],Y=test[,1],mntd.obs.z=test[,3]))
+dim(test)
+
+r<-NULL
+gn<-unique(test[,2])
+l<-unique(ml[,c(2,17)])
+for (i in 1:length(gn)) {
+  t<-summary(test[test[,2]==gn[i],3])[c(1,3,4,6)] 
+  r<-rbind(r,data.frame(name=gn[i],ele=l[l[,1]==gn[i],2],min=t[[1]],median=t[[2]],mean=t[[3]],max=t[[4]]))
+}
+head(r)
+dim(r)
+
+plot(r$ele,r$mean,type="no",col="black",pch=19,ylim=c(min(r$min),max(r$max)),xlab="Elevation (m)",ylab="ses.beta.mntd",main = "Plot level")
+for (i in 1:159) {  segments(r$ele[i],r$min[i],r$ele[i],r$max[i],col="gray")}
+
+segments(2000,1.96,5000,1.96,lty=2,col="gray")
+segments(2000,-1.96,5000,-1.96,lty=2,col="gray")
+
+points(r$ele,r$mean,col="black",pch=19)
+points(r$ele,r$max,col="pink",pch=19)
+points(r$ele,r$min,col="steelblue",pch=19)
+
+plot.trendl.pr(r$ele,r$mean,lcol="black")
+#plot.trendl.pr(r$ele,r$min)
+#plot.trendl.pr(r$ele,r$max)
+#points(r$ele,r$median,col="gray")
+
+
+#beta.nti海拔距离画图####
+#######################################################
+#分辨率####
+#插值数据准备####
+s.e<-(unique(ml[,c(3,17)]))#提取物种-海拔列表
+s.e<-s.e[order(s.e[,1]),]#按物种排序
+s.e[,1]<-gsub(" ","_",s.e[,1])
+s<-unique(ml[,3])
+s<-gsub(" ","_",s)#物种名的空格换为下划线
+
+slh<-NULL#species low high物种海拔上下限
+for (i in 1:length(s)) {  slh<-rbind(slh,data.frame(s=s[i],min=min(s.e[s.e[,1]==s[i],2]),max=max(s.e[s.e[,1]==s[i],2])))}
+res<-seq(50,500,by=50)
+slh[slh[,1]=="Rosa_glomerata",3]<-2201
+slh[slh[,1]=="Polygala_sibirica",3]<-2201
+
+
+#分辨率列表####
+l.res<-NULL#0-1分辨率列表
+for (i in 1:length(res)) {
+  t1<-seq(2200,4750,by=res[i])
+  t2<-c(t1[2:length(t1)])
+  t2[length(t2)]<-4750
+  l.res[[i]]<-rbind(t1[1:(length(t1)-1)],t2)
+}
+l.ele<-NULL
+for (i in 1:10) {l.ele[[i]]<-l.res[[i]]
+  
+}
+#01矩阵列表####
+l.m01<-NULL#0-1矩阵列表
+l.m01_10<-NULL
+for (j in 1:10) {#控制分辨率
+#j<-2
+m01<-sl<-sh<-bl<-bh<-as.data.frame(array(dim=c(length(l.res[[j]][1,]),407)))#仅改变取样单元数量，物种数不变
+#unique(s.e[order(s.e[,1]),1])==s[order(s)]
+for (i in 1:407) {#批量填充临时辅助矩阵
+  sl[,i]<-slh[slh[,1]==s[i],2]
+  sh[,i]<-slh[slh[,1]==s[i],3]
+}
+for (i in 1:length(m01[,1])) {
+  bl[i,]<-l.res[[j]][1,i]
+  bh[i,]<-l.res[[j]][2,i]
+}
+
+m01<-!((sh<=bl)|(sl>bh))#两种或的情况要排除，前面加取反号
+rownames(m01)<- paste("b",1:length(l.res[[j]][1,]),sep="")
+colnames(m01)<-s
+
+l.m01_10[[j]]<-m01
+#plot(rowSums(m01))
+}
+
+remove(sl,sh,bl,bh)#释放空间
+
+for (i in 1:10) {
+  l.m01_10[[i]][l.m01_10[[i]]==T]<-1
+  l.m01_10[[i]][l.m01_10[[i]]==F]<-0
+}#TF转成01
+
+l.m01_10no<-l.m01_10#fd计算的01矩阵中的物种名要用不带下划线的版本
+for (i in 1:10) {  t<-colnames(l.m01_10[[i]])
+colnames(l.m01no[[i]])<-gsub("_"," ",t)}
+l.m01_10
+
+#计算alpha pd#####
+t<-proc.time()
+l.pd<-l.mpd<-l.mntd<-l.sespd<-l.sesmpd<-l.sesmntd<-NULL
+for (i in 1:10) {#628s
+l.pd[[i]]<-picante::pd(l.m01_10[[i]],ml.tree$scenario.3)
+l.mpd[[i]]<-picante::mpd(l.m01_10[[i]],ml_phy_dist,abundance.weighted=F)
+l.mntd[[i]]<-picante::mntd(l.m01_10[[i]],ml_phy_dist,abundance.weighted=F)
+l.sespd[[i]]<-picante::ses.pd(l.m01_10[[i]], ml.tree$scenario.3, null.model = "taxa.labels",  runs = 999)#900s
+l.sesmpd[[i]]<-picante::ses.mpd(l.m01_10[[i]],ml_phy_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#850s
+l.sesmntd[[i]]<-picante::ses.mntd(l.m01_10[[i]],ml_phy_dist,null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#297s
+}
+proc.time()-t
+
+#计算beta pd#####
+
+
+l.b.pd<-l.b.mpd<-l.b.mntd<-l.ses.b.mntd<-NULL
+for (i in 1:10) {#1698s
+l.b.pd[[i]]<-picante::phylosor(l.m01_10[[i]], ml.tree$scenario.3)  
+l.b.mpd[[i]]<-picante::comdist(l.m01_10[[i]],ml_phy_dist,abundance.weighted=F)
+l.b.mntd[[i]]<-picante::comdistnt(l.m01_10[[i]],ml_phy_dist,abundance.weighted=F)
+l.ses.b.mntd[[i]]<-ses.beta.mntd(l.m01_10[[i]],ml_phy_dist)
+}
+
+t<-proc.time()
+l.ses.b.mpd<-NULL
+for (i in 1:10) {
+  l.ses.b.mpd[[i]]<-ses.beta.mpd(l.m01_10[[i]],ml_phy_dist,times = 999)
+}#99-143s,999-1548s
+proc.time()-t
+
+color<-c("blueviolet","midnightblue","darkslateblue","steelblue3","darkcyan",
+         "seagreen3","yellowgreen","gold","darkorange","tomato","maroon","blue","green","black","gray")
+
+
+#alpha beta.sr随尺度变化####
+dim(as.matrix(vegan::vegdist(l.m01[[1]])))
+
+l.sr<-l.beta.sr<-NULL
+for (i in 1:10) { l.sr[[i]]<-rowSums(l.m01_10[[i]]) 
+l.beta.sr[[i]]<-vegan::vegdist(l.m01_10[[i]])}#计算分辨率下的alpha beta sr
+
+
+path<-paste("C:/D/r/meili2/jpg/10分辨率-sr-alpha ",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69/2.5,height=8.27/1.75)
+
+par(mfrow=c(1,1),mar=c(4,5,5,0.5))
+plot(1,1,type="no",xlim=c(2150,4750),ylim=c(0,max(l.sr[[10]])),xlab="Elevation (m)",ylab="sr(species richness)",cex.lab=1.5,cex.axis=1.5)
+for (i in 1:10) {points(l.res[[i]][1,],l.sr[[i]],pch=19,col=color[i],type="l",lwd=2)}
+legend(x=4000,y=max(l.sr[[10]]),legend=paste(seq(50,500,by=50),"m width",sep=""),cex=0.7,lty=1,col=color,lwd =3,bty="n")   #
+
+plot(1,1,type="no",xlim=c(min(log(dtc(l.d.e[[i]])+1)),7.85),ylim=c(0,1),xlab="Ln transformed elevation distance",ylab="beta.sr",cex.lab=1.5,cex.axis=1.5)
+for (i in 1:10) {points(log(dtc(l.d.e[[i]])+1),dtc(l.beta.sr[[i]]),pch=19,col=color[i],cex=0.6)}
+for (i in 1:10) {plot.trendl.pr(log(dtc(l.d.e[[i]])+1),dtc(l.beta.sr[[i]]),lcol=color[i],lwidth=2,type="no",term=1)}
+legend(x=7.2,y=0.8,legend=paste(seq(50,500,by=50),"m width",sep=""),cex=0.7,lty=1,col=color,lwd =3,bty="n")   #
+par(mfrow=c(1,1))
+
+dev.off()
+  
+  
+
+
+#alpha pd随尺度变化####
+plot.res.alpha<-function(x,y,xl=c(2150,5000)){
+  plot(1,1,type="no",xlim=xl,ylim=c(min(l.pd[[1]][,1]),max(l.pd[[10]][,1])))
+  for (i in 1:10) {  points(l.res[[i]][1,],l.pd[[i]][,1],col=color[i],type="l",lwd=3)}
+  legend(x=4800,y=max(max(l.pd[[1]][,1]),max(l.pd[[10]][,1])),legend=paste(seq(50,500,by=50),"m width",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+  
+}
+
+path<-paste("C:/D/r/meili2/jpg/10分辨率-alpha pds",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27*3/2)
+
+par(mfrow=c(3,2),mar=c(4,5,5,0.5))
+xl<-c(2150,5150)
+leg.x<-4600
+cm<-2
+cl<-2.5
+plot(1,1,type="no",xlim=xl,ylim=c(min(l.pd[[1]][,1]),max(l.pd[[10]][,1])),xlab="Elevation (m)",ylab="pd",cex.main=cm,cex.lab=cl)
+for (i in 1:10) {  points(l.res[[i]][1,],l.pd[[i]][,1],col=color[i],type="l",lwd=3)}
+legend(x=leg.x,y=max(max(l.pd[[1]][,1]),max(l.pd[[10]][,1])),legend=paste(seq(50,500,by=50),"m width",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+
+plot(1,1,type="no",xlim=xl,ylim=c(min(min(l.sespd[[1]][,6]),min(l.sespd[[10]][,6])),max(max(l.sespd[[1]][,6]),max(l.sespd[[10]][,6]))),xlab="Elevation (m)",ylab="ses.pd",cex.main=cm,cex.lab=cl)
+for (i in 1:10) {  points(l.res[[i]][1,],l.sespd[[i]][,6],col=color[i],type="l",lwd=3)}
+legend(x=leg.x,y=max(max(l.sespd[[1]][,6]),max(l.sespd[[10]][,6])),legend=paste(seq(50,500,by=50),"m width",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+segments(2000,1.96,6000,1.96,lty=2)
+segments(2000,-1.96,6000,-1.96,lty=2)
+
+
+plot(1,1,type="no",xlim=xl,ylim=c(min(min(l.mpd[[1]]),min(l.mpd[[10]])),max(max(l.mpd[[1]]),max(l.mpd[[10]]))),xlab="Elevation (m)",ylab="mpd",cex.main=cm,cex.lab=cl)
+for (i in 1:10) {  points(l.res[[i]][1,],l.mpd[[i]],col=color[i],type="l",lwd=3)}
+legend(x=leg.x,y=max(max(l.mpd[[1]]),max(l.mpd[[10]])),legend=paste(seq(50,500,by=50),"m width",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+
+plot(1,1,type="no",xlim=xl,ylim=c(min(min(l.sesmpd[[1]][,6]),min(l.sesmpd[[10]][,6])),max(max(l.sesmpd[[1]][,6]),max(l.sesmpd[[10]][,6]))),xlab="Elevation (m)",ylab="ses.mpd",cex.main=cm,cex.lab=cl)
+for (i in 1:10) {  points(l.res[[i]][1,],l.sesmpd[[i]][,6],col=color[i],type="l",lwd=3)}
+legend(x=leg.x,y=max(max(l.sesmpd[[1]][,6]),max(l.sesmpd[[10]][,6])),legend=paste(seq(50,500,by=50),"m width",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+segments(2000,1.96,6000,1.96,lty=2)
+segments(2000,-1.96,6000,-1.96,lty=2)
+
+plot(1,1,type="no",xlim=xl,ylim=c(min(min(l.mntd[[1]]),min(l.mntd[[10]])),max(max(l.mntd[[1]]),max(l.mntd[[10]]))),xlab="Elevation (m)",ylab="mntd",cex.main=cm,cex.lab=cl)
+for (i in 1:10) {  points(l.res[[i]][1,],l.mntd[[i]],col=color[i],type="l",lwd=3)}
+legend(x=leg.x,y=max(max(l.mntd[[1]]),max(l.mntd[[10]])),legend=paste(seq(50,500,by=50),"m width",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+
+plot(1,1,type="no",xlim=xl,ylim=c(min(min(l.sesmntd[[1]][,6]),min(l.sesmntd[[10]][,6])),max(max(l.sesmntd[[1]][,6]),max(l.sesmntd[[10]][,6]))),xlab="Elevation (m)",ylab="ses.mntd",cex.main=cm,cex.lab=cl)
+for (i in 1:10) {  points(l.res[[i]][1,],l.sesmntd[[i]][,6],col=color[i],type="l",lwd=3)}
+legend(x=leg.x,y=max(max(l.sesmntd[[1]][,6]),max(l.sesmntd[[10]][,6])),legend=paste(seq(50,500,by=50),"m width",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+segments(2000,1.96,6000,1.96,lty=2)
+segments(2000,-1.96,6000,-1.96,lty=2)
+
+par(mfrow=c(1,1))
+dev.off()
+
+l.d.p<-l.d.h<-l.d.a<-l.d.e<-NULL#list of distance of elevation,het,area,pre自变量距离矩阵列表
+for (i in 1:10) {  l.d.e[[i]]<-dist(l.res[[i]][1,])}
+
+#beta pd 随尺度变化####
+plot.res.beta<-function(x,y,xname="Ln transformed elevation distance",yname="",mainnane="",showlegend="yes",lwidth=2,ses="no"){
+  color<-c("blueviolet","midnightblue","darkslateblue","steelblue3","darkcyan","seagreen3","yellowgreen","gold","darkorange","tomato","maroon")
+  
+  plot(x[[1]],y[[1]],type="no",xlim=c(l.findmami(x)[2],1.2*l.findmami(x)[1]),ylim=c(l.findmami(y)[2],l.findmami(y)[1]),
+       xlab=xname,ylab=yname,main=mainname,cex.lab=2,cex.axis=1.5,cex.main=3)
+  for (i in 1:10) 
+  { 
+    points(x[[i]],y[[i]],pch=19,col=color[i])
+    plot.trendl.pr(x[[i]],y[[i]],lcol=color[i],lwidth=2)
+  }
+  if (showlegend=="yes") {
+legend(x=l.findmami(x)[1],y=l.findmami(y)[1],legend=paste(seq(50,500,by=50),"m width",sep=""),lty=1,col=color,lwd =3,bty="n",y.intersp = 1)   #
+  }
+}
+
+plot.res.beta(l.d.e,l.ses.b.mntd,yname="l.ses.b.mntd")
+
+path<-paste("C:/D/r/meili2/jpg/10分辨率-beta pds",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+#xl<-3300
+#plot(dtc(l.d.e[[1]]),l.b.pd[[1]],type="no",xlim=c(0,xl),xlab="Elevation distane",ylab="beta.pd",main="")
+#for (i in 1:10) { points(dtc(l.d.e[[i]]),dtc(l.b.pd[[i]]),pch=19,col=color[i])}
+#for (i in 1:10) { plot.trendl.pr(dtc(l.d.e[[i]]),dtc(l.b.pd[[i]]),lcol=color[i],lwidth=2,type="no")}
+#legend(x=2500,y=max(na.omit(l.b.pd[[1]])),legend=paste(seq(50,500,by=50),"m width",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+
+par(mfrow=c(2,2),mar=c(4,5,5,0.5))
+#l.findmami(l.b.mpd)
+
+plot(log(dtc(l.d.e[[1]])+1),l.b.mpd[[1]],type="no",xlim=c(4,8.5),xlab="Ln transformed elevation distance",ylab="beta.mpd",main="",cex.lab=2,cex.axis=1.5)
+for (i in 1:10) { points(log(dtc(l.d.e[[i]])+1),dtc(l.b.mpd[[i]]),pch=19,col=color[i])}
+for (i in 1:10) { plot.trendl.pr(log(dtc(l.d.e[[i]])+1),dtc(l.b.mpd[[i]]),lcol=color[i],lwidth=2,type="no")}
+legend(x=7.8,y=max(na.omit(l.b.mpd[[1]])),legend=paste(seq(50,500,by=50),"m",sep=""),lty=1,col=color,lwd =3,bty="n",y.intersp=1.35)   #
+
+plot(log(dtc(l.d.e[[1]])+1),l.b.mntd[[1]],type="no",xlim=c(4,8.5),xlab="Ln transformed elevation distance",ylab="beta.mntd",main="",cex.lab=2,cex.axis=1.5)
+for (i in 1:10) { points(log(dtc(l.d.e[[i]])+1),dtc(l.b.mntd[[i]]),pch=19,col=color[i])}
+for (i in 1:10) { plot.trendl.pr(log(dtc(l.d.e[[i]])+1),dtc(l.b.mntd[[i]]),lcol=color[i],lwidth=2,type="no")}
+legend(x=7.8,y=max(na.omit(l.b.mntd[[1]])),legend=paste(seq(50,500,by=50),"m",sep=""),lty=1,col=color,lwd =3,bty="n",y.intersp=1.35)   #
+
+plot(log(dtc(l.d.e[[1]])+1),l.ses.b.mpd[[1]][,6],type="no",xlim=c(4,8.5),xlab="Ln transformed elevation distance",ylab="ses.beta.mpd",main="",cex.lab=2,cex.axis=1.5)
+for (i in 1:10) { points(log(dtc(l.d.e[[i]])+1),l.ses.b.mpd[[i]][,6],pch=19,col=color[i])}
+for (i in 1:10) { plot.trendl.pr(log(dtc(l.d.e[[i]])+1),l.ses.b.mpd[[i]][,6],lcol=color[i],lwidth=2,type="no")}
+segments(-100,1.96,3500,1.96,lty=2)
+segments(-100,-1.96,3500,-1.96,lty=2)
+
+plot(log(dtc(l.d.e[[1]])+1),l.ses.b.mntd[[1]][,6],type="no",xlim=c(4,8.5),xlab="Ln transformed elevation distance",ylab="ses.beta.mntd",main="",cex.lab=2,cex.axis=1.5)
+for (i in 1:10) { points(log(dtc(l.d.e[[i]])+1),l.ses.b.mntd[[i]][,6],pch=19,col=color[i])}
+for (i in 1:10) { plot.trendl.pr(log(dtc(l.d.e[[i]])+1),l.ses.b.mntd[[i]][,6],lcol=color[i],lwidth=2,type="no")}
+segments(-100,1.96,3500,1.96,lty=2)
+segments(-100,-1.96,3500,-1.96,lty=2)
+
+par(mfrow=c(1,1))
+dev.off()
+
+
+
+
+#alpha fd 随尺度变化#####
+l.fric<-l.fdis<-l.feve<-l.fdiv<-l.mfd<-l.mnfd<-NULL
+for (i in 1:10) {
+alpha_fd<- mFD::alpha.fd.multidim(
+  sp_faxes_coord   = sp_faxes_coord_ml[ , 1:6], #选轴空间来代替原始性状空间#取样单元内物种数量要高于轴的数量
+  asb_sp_w         = as.matrix(l.m01no[[i]]),#植被落矩阵,类型必需是matrix，不能是数据框
+  ind_vect         = c("fdis", "fmpd", "fnnd", "feve", "fric", "fdiv","fide"),#用户指定计算哪些指标
+  scaling          = TRUE,  check_input      = TRUE,  details_returned = TRUE)
+l.fric[[i]]<-alpha_fd$functional_diversity_indices$fric
+l.fdis[[i]]<-alpha_fd$functional_diversity_indices$fdis
+l.feve[[i]]<-alpha_fd$functional_diversity_indices$feve
+l.fdiv[[i]]<-alpha_fd$functional_diversity_indices$fdiv
+l.mfd[[i]]<-alpha_fd$functional_diversity_indices$fmpd
+l.mnfd[[i]]<-alpha_fd$functional_diversity_indices$fnnd  
+}#6min#批量计算功能a多样性
+
+t<-proc.time()
+l.ses.mfd<-l.ses.mnfd<-NULL
+for (i in 1:10) {#628s
+  l.ses.mfd[[i]]<-picante::ses.mpd(l.m01no[[i]],as.matrix(ml_fun_dist_mfd),null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#850s
+  l.ses.mnfd[[i]]<-picante::ses.mntd(l.m01no[[i]],as.matrix(ml_fun_dist_mfd),null.model = "taxa.labels",abundance.weighted=F,  runs = 999)#297s
+}#计算功能ses a多样性#244s
+proc.time()-t
+for (i in 1:10) {
+  l.ses.mfd[[i]]<-l.ses.mfd[[i]][,6]
+  l.ses.mnfd[[i]]<-l.ses.mnfd[[i]][,6]
+}#提取第六列
+l.findmami<-function(list){
+  r<-NULL
+  for (i in 1:length(list)) {
+    r<-rbind(r,data.frame(max=max(list[[i]]),min=min(list[[i]])))
+  }
+  return(data.frame(max=max(r[,1]),min=min(r[,2])))
+}#查找10个元素列表的最大值和最小值
+plot.res.f.a<-function(x,y,yname){
+  plot(x[[1]][1,],y[[1]],type="n",xlim=c(2200,4900),ylim=c(l.findmami(y)$min,l.findmami(y)$max),ylab=yname,xlab="Elevation (m)",cex.axis=1.5,cex.lab=2.5,cex.main=2)
+  for (i in 1:10) {
+      points(x[[i]][1,],y[[i]],pch=19,col=color[i],type="l",lwd=2)
+  }
+  legend(x=4500,y=l.findmami(y)$max,legend=paste(seq(50,500,by=50),"m",sep=""),cex=1,lty=1,col=color,lwd =3,bty="n")   #
+}
+
+path<-paste("C:/D/r/meili2/jpg/10分辨率-alpha fd",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27*2)
+
+par(mfrow=c(4,2),mar=c(4,5,5,0.5))
+plot.res.f.a(l.res,l.fric,"Fric")
+plot.res.f.a(l.res,l.fdis,"Fdis")
+plot.res.f.a(l.res,l.feve,"Feve")
+plot.res.f.a(l.res,l.fdiv,"Fdiv")
+plot.res.f.a(l.res,l.mfd,"mfd")
+plot.res.f.a(l.res,l.mnfd,"mnfd")
+
+plot.res.f.a(l.res,l.ses.mfd,"ses.mfd")
+segments(-100,1.96,4750,1.96,lty=2)
+segments(-100,-1.96,4750,-1.96,lty=2)
+
+plot.res.f.a(l.res,l.ses.mnfd,"ses.mnfd")
+segments(-100,1.96,4750,1.96,lty=2)
+segments(-100,-1.96,4750,-1.96,lty=2)
+
+par(mfrow=c(1,1))
+dev.off()
+
+#beta fd 随尺度变化#####
+l.b.fd<-l.b.mfd<-l.b.mnfd<-NULL
+l.b.fd.n<-NULL
+for (i in 1:10) {
+beta_fd <- mFD::beta.fd.multidim(
+sp_faxes_coord   = sp_faxes_coord_ml[ , 1:4], #选轴空间来代替原始性状空间
+#All assemblages should have more species than number of functional axes
+# Computing beta functional diversity in a6-dimensions space could exceed computing power 
+#of your computer. Consider keeping only five dimensions
+asb_sp_occ       = as.matrix(l.m01no[[i]]),#群落矩阵,类型必需是matrix，不能是数据框
+check_input      = TRUE,
+beta_family      = c("Sorensen"),#可以选sorensen或jaccard
+details_returned = TRUE)
+
+l.b.fd.n[[i]]<-(beta_fd$pairasb_fbd_indices)
+#l.b.mfd[[i]]<-picante::comdist(l.m01no[[i]],ml_fun_dist,abundance.weighted=F)#样方/群落/植被-功能beta多样性-beta_mfd
+#l.b.mnfd[[i]]<-picante::comdistnt(l.m01no[[i]],ml_fun_dist,abundance.weighted=F)
+}#批量计算功能beta多样性
+
+
+
+l.ses.b.mnfd<-NULL
+for (i in 1:10) {
+  l.ses.b.mnfd[[i]]<-ses.beta.mntd(l.m01no[[i]],as.matrix(ml_fun_dist_mfd))[,6]
+  #Error in dis[sppInSample1, sppInSample2, drop = FALSE] : incorrect number of dimensions
+  #是因为comdist 和comdistnt输入的距离矩阵要是matrix类型而不是dist类型
+  
+}#计算功能ses.b.mnfd多样性
+
+t<-proc.time()
+l.ses.b.mfd<-NULL
+for (i in 1:10) {
+  l.ses.b.mfd[[i]]<-ses.beta.mpd(l.m01no[[i]],as.matrix(ml_fun_dist_mfd))[,6]
+  #Error in dis[sppInSample1, sppInSample2, drop = FALSE] : incorrect number of dimensions
+  #是因为comdist 和comdistnt输入的距离矩阵要是matrix类型而不是dist类型
+}#计算功能ses.b.mfd多样性#999-1642s
+proc.time()-t
+
+
+path<-paste("C:/D/r/meili2/jpg/分辨率-beta fds",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27)
+xl<-2900
+cl<-1.5
+cm<-2
+ca<-1.5
+lw<-3
+par(mfrow=c(2,2))
+
+plot(dtc(l.d.e[[1]]),l.b.fd[[1]],type="no",xlim=c(0,xl),xlab="Elevation distane",ylab="",main="beta.fd",cex.lab=cl,cex.main=cm,cex.axis=ca)
+for (i in 1:10) { points(dtc(l.d.e[[i]]),dtc(l.b.fd[[i]]),pch=19,col=color[i])}
+for (i in 1:10) { plot.trendl.pr(dtc(l.d.e[[i]]),dtc(l.b.fd[[i]]),lcol=color[i],lwidth=lw,type="no")}
+legend(x=2500,y=max(na.omit(l.b.pd[[1]])),legend=paste(seq(50,500,by=50),"m",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+
+plot(dtc(l.d.e[[1]]),l.b.mfd[[1]],type="no",xlim=c(0,xl),xlab="Elevation distane",ylab="",main="beta.mfd",cex.lab=cl,cex.main=cm,cex.axis=ca)
+for (i in 1:10) { points(dtc(l.d.e[[i]]),dtc(l.b.mfd[[i]]),pch=19,col=color[i])}
+for (i in 1:10) { plot.trendl.pr(dtc(l.d.e[[i]]),dtc(l.b.mfd[[i]]),lcol=color[i],lwidth=lw,type="no")}
+legend(x=2500,y=max(na.omit(l.b.mfd[[1]])),legend=paste(seq(50,500,by=50),"m",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+
+plot(dtc(l.d.e[[1]]),l.b.mnfd[[1]],type="no",xlim=c(0,xl),xlab="Elevation distane",ylab="",main="beta.mnfd",cex.lab=cl,cex.main=cm,cex.axis=ca)
+for (i in 1:10) { points(dtc(l.d.e[[i]]),dtc(l.b.mnfd[[i]]),pch=19,col=color[i])}
+for (i in 1:10) { plot.trendl.pr(dtc(l.d.e[[i]]),dtc(l.b.mnfd[[i]]),lcol=color[i],lwidth=lw,type="no")}
+legend(x=2500,y=max(na.omit(l.b.mnfd[[1]])),legend=paste(seq(50,500,by=50),"m",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+
+plot(dtc(l.d.e[[1]]),l.ses.b.mnfd[[1]],type="no",xlim=c(0,xl),xlab="Elevation distane",ylab="",main="ses.beta.mnfd",cex.lab=cl,cex.main=cm,cex.axis=ca)
+for (i in 1:10) { points(dtc(l.d.e[[i]]),l.ses.b.mnfd[[i]],pch=19,col=color[i])}
+for (i in 1:10) {if(i>1) {plot.trendl.pr(dtc(l.d.e[[i]]),l.ses.b.mnfd[[i]],lcol=color[i],lwidth=lw,type="y")}}
+legend(x=2500,y=max(na.omit(l.ses.b.mnfd[[1]])),legend=paste(seq(50,500,by=50),"m",sep=""),lty=1,col=color,lwd =3,bty="n")   #
+segments(-100,1.96,3500,1.96,lty=2)
+segments(-100,-1.96,3500,-1.96,lty=2)
+
+par(mfrow=c(1,1))
+dev.off()
+
+
+#计算气候自变量随分辨率####
+
+pha<-data.frame(e=for_averageif[,1],P=predict(prcomp(for_averageif[,13:20],center = T,scale=T))[,2],A=for_averageif[,24],H=for_averageif[,23])
+
+l.x<-NULL
+for (j in 1:10) {#控制分辨率
+ l.x[[j]]<-data.frame(array(dim=c(length(l.res[[j]][1, ]),3)))#先开辟空间，不然下面赋值找不到
+ colnames(l.x[[j]])<-c("P","A","H")
+  for (k in 2:4) {#控制计算的是第几个气候变量
+   for (i in 1:length(l.res[[j]][1, ]))#控制第几个取样单元
+    {
+      l.x[[j]][i,(k-1)]<-mean(pha[pha[,1]>=l.res[[j]][1,i]&pha[,1]<=l.res[[j]][2,i],k])
+    }
+  }
+ l.x[[j]]<-as.data.frame(scale(l.x[[j]]))#每个分辨率顺便标准化
+}
+#尺度的模型选择和平均####
+l.pd2<-l.sespd2<-l.sesmpd2<-l.sesmntd2<-l.ses.mfd2<-l.ses.mnfd2<-NULL
+for (i in 1:10) {
+  l.pd2[[i]]<-l.pd[[i]][,1]
+  l.sespd2[[i]]<-l.sespd[[i]][,6]
+  l.sesmpd2[[i]]<-l.sesmpd[[i]][,6]
+  l.sesmntd2[[i]]<-l.sesmntd[[i]][,6]
+ # l.ses.mfd2[[i]]<-l.ses.mfd[[i]][,6]
+ # l.ses.mnfd2[[i]]<-l.ses.mnfd[[i]][,6]
+  
+}#只取出想要的包含y的列
+
+l.y<-list(l.sr,l.fric,l.fdis,l.feve,l.fdiv,l.mfd,l.mnfd,l.ses.mfd,l.ses.mnfd,
+         l.pd2,l.mpd,l.mntd,l.sespd2,l.sesmpd2,l.sesmntd2)#集合所有alpha 的y到一个list
+#length(l.y)
+names(l.y)<-c("sr","fric","fdis","feve","fdiv","mfd","mnfd","sesmfd","sesmnfd",
+      "pd","mpd","mntd","sespd","sesmpd","sesmntd")#改名
+
+l.mab10.r<-NULL#15个y的10种分辨率的模型选择和模型平均结果列表
+for (i in 1:15) {  l.mab10.r[[i]]<-mab10(l.x,l.y[[i]],names(l.y)[i])}
+names(l.mab10.r)<-names(l.y)#改名
+
+#画图####
+res<-seq(50,500,by=50)
+path<-paste("C:/D/r/meili2/jpg/分辨率-最优模型权重",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27/2)
+
+par(mfrow=c(1,2))
+plot(res,l.mab10.r[[1]][[1]][,10],type="no",main="Best model weight",xlab="Resolution",ylab="",ylim=c(0,1),xlim=c(50,550))
+for (i in 1:9) {points(res,l.mab10.r[[i]][[1]][,10],type="l",lwd=2,col=color[i])}
+legend(legend=names(l.mab10.r)[1:9],x="bottomright",col=color[1:9],lwd=2,cex=1,bty="n")
+
+plot(res,l.mab10.r[[1]][[1]][,10],type="no",main="Best model weight",xlab="Resolution",ylab="",ylim=c(0,1),xlim=c(50,550))
+for (i in 10:15) {points(res,l.mab10.r[[i]][[1]][,10],type="l",lwd=2,col=color[i-9])}
+legend(legend=names(l.mab10.r)[10:15],x="bottomright",col=color[1:6],lwd=2,cex=1,bty="n")
+par(mfrow=c(1,1))
+dev.off()
+
+#提取重要值#####
+d<-t<-NULL#提取重要值
+for (j in 1:15) {
+y<-l.y[[j]]
+xt<-l.x
+for (i in 1:10) {
+  x<-xt[[i]]
+  mod<-lm(y[[i]]~P+A+H,data=x)
+  options(na.action = na.fail)
+  t[[i]]<-MuMIn::dredge(mod, beta = "sd", evaluate = TRUE,rank = "AICc",extra = "adjR^2")
+
+}
+impo1<-NULL
+for (o in 1:10) {#i选择分辨率
+  md.avg<-MuMIn::model.avg(object=t[[o]])
+  
+  # ma.SR.list[[i]]<-as.matrix(summary(md.avg)[10][[1]])
+  sum1<-NULL#切换分辨率时清零
+  for (p in 1:3)  #变量代码
+  {
+    l<-length(summary(md.avg)[[1]][, 1])
+    sum <- 0 
+    for (k in 1:l) 
+    {
+      if (grepl(p, row.names(summary(md.avg)[[1]])[k]))
+      {
+        sum <- sum + as.numeric(summary(md.avg)[[1]][k, 5])
+      }#查找字符串，包含变量(结果为TRUE)才将权重求和
+    }
+    sum1<-rbind(sum1,cbind(50*o,p,sum))#分辨率，变量代号，权重和
+  }  
+  impo1<-rbind(impo1,sum1)#不同分辨率结果上下拼
+}
+d[[j]]<-impo1
+}
+names(d)<-names(l.y)
+#画图#####
+seq(1,30,by=3)#间隔取出列中对应的同一个自变量
+
+path<-paste("C:/D/r/meili2/jpg/分辨率15个y模型选择",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*4/3,height=8.27*2)
+
+par(mfrow=c(4,4))
+
+for (j in 1:15) {
+plot(res,res,type="no",ylim=c(0,1),main=names(d)[[j]],ylab = "",xlab="Resolution",cex.main=3,cex.axis=2,cex.lab=2)
+for (i in 1:3) {points(d[[j]][seq(i,30,by=3),1],d[[j]][seq(i,30,by=3),3],lwd=3,type="l",col=color[3*i])  }#一个图三个自变量
+}
+plot(res,res,type="no",ylim=c(0,1),ylab = "",xlab="",axes=F)
+legend(x="top",lwd=4,col=color[c(3,6,9)],legend=c("Area","Heterogeneity","Precipitation"),bty="n",cex=3)
+par(mfrow=c(1,1))
+dev.off()
+
+#sr-其他14个相关性####
+r2<-NULL
+for (j in 1:10) {
+  r1<-NULL
+  for (i in 2:15) {
+    r1<-rbind(r1,data.frame(res=j*50,name=names(l.y)[i],cor=cor(l.y[[1]][[j]],l.y[[i]][[j]]),p=cor.test(l.y[[1]][[j]],l.y[[i]][[j]])[3]))
+  }
+  r2<-rbind(r2,r1)
+}
+r2
+cor.test(l.y[[1]][[1]],l.y[[2]][[1]])[9][1]
+
+path<-paste("C:/D/r/meili2/jpg/分辨率 sr-其他14个相关",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69/3*1.5,height=8.27/2)
+
+plot(res,res,type="no",xlim=c(50,600),ylim=c(-1,1),main="Correlation",ylab = "",xlab="Resolution",cex.main=1.5,cex.axis=1,cex.lab=1)
+for (j in 1:14) {  
+points(r2[seq(j,140,by=14),1],r2[seq(j,140,by=14),3],lwd=2,type="l",col=color[j]) 
+}
+points(r2[r2[,4]<0.05,1],r2[r2[,4]<0.05,3],pch=19,cex=0.8)
+legend(x="bottomright",lwd=2,col=color,legend=names(l.y)[2:15],bty="n",cex=0.7)
+  dev.off()
+  
+  
+  
+#系统发育信号####  
+  library(microeco)
+  data(otu_table_16S)  #OTU 丰度矩阵，共包含 90 列样本的 13628 行 OTU
+  otu_table_16S[1:6,1:6]
+  
+  data(env_data_16S)  #包含 90 个样本的环境变量矩阵
+  env_data_16S[1:6,1:6]
+  
+  data(phylo_tree_16S)  #13628 个 OTU 的系统发育进化树（备注：如要导入自己的进化树，可使用 ape 包函数 read.tree() 读取外部进化树文件）
+  phylo_tree_16S
+  #整合 OTU 丰度和系统发育关系的数据，详情 ?microtable
+  #dataset <- microtable$new(otu_table = otu_table_16S, phylo_tree = phylo_tree_16S)
+  dataset <- microtable$new(otu_table = t(m01_plot_), phylo_tree = ape::multi2di(ml.tree$scenario.3))
+  
+  #计算 OTU 环境最优值差异和系统发育距离，并绘制系统发育 Mantel 相关图，详情 ?trans_nullmodel
+  #默认情况下使用矩阵中所有 OTU 计算，由于全部运行非常慢，本示例额外通过 taxa_number=100 仅从中节选了 100 个 OTU 用作简单演示
+  #use_env 指定使用哪些环境变量计算 OTU 的环境最优值，本示例中节选环境变量 Latitude、Longitude、Altitude 为例作演示
+  #break.pts 用于划分进化时间步长，本示例中以 0.02 的系统发育距离为一个步长，共产生 50 个 bin
+  #本示例中 Mantel 相关性的显著性通过 nperm=999 次随机置换获取估计，并通过 mult='bonferroni' 指定 bonferroni 方法校正 P 值
+  set.seed(123)
+  t1 <- trans_nullmodel$new(dataset, taxa_number = 407, add_data = xinfo_plot[,5:7])
+  #t1 <- trans_nullmodel$new(dataset, taxa_number = 100, add_data = env_data_16S)
+  t1$cal_mantel_corr(use_env = c('PRE', 'AREA', 'HET'), break.pts = seq(0, 1, 0.01), nperm = 999, mult = 'bonferroni')
+  #t1$cal_mantel_corr(use_env = c('Latitude', 'Longitude', 'Altitude'), break.pts = seq(0, 1, 0.01), nperm = 999, mult = 'bonferroni')
+  
+  t1$plot_mantel_corr()
+  
+  #提取计算结果
+  result <- data.frame(t1$res_mantel_corr$mantel.res)
+  head(result)
+  
+  #输出计算结果
+  #write.csv(result, 'result.csv') 
+library(picante)  
+picante::data("phylocom")
+phy<-phylocom$phylo  #树文件
+comm<-phylocom$sample #物种矩阵
+traits<-phylocom$traits #性状
+head(phylocom$traits) #性状
+traits2<-traits[phy$tip.label,]
+
+picante::multiPhylosignal(traits2,phy)
+View(ml)
+
+traits<-unique(ml[,c(3,6:16)])
+for (i in 5:12) {
+  u<-unique(traits[,i])
+  for (j in 1:length(u)) {
+    traits[traits[,i]==u[j],i]<-j
+  }
+  traits[,i]<-as.numeric(traits[,i])
+  }
+rownames(traits)<-gsub(" ","_",traits[,1])
+#rownames(traits)<-traits[,1]
+dim(traits)
+traits<-traits[,2:12]
+#names(traits)<-c("l","w","h","n")
+head(traits)
+
+myphy<-ape::multi2di(ml.tree$scenario.3)
+#Error in pic(x, phy, scaled) : 'phy' is not rooted and fully dichotomous
+#如果树有梳齿，非完全二叉树，则不能跑multiPhylosignal
+#用multi2di强行转成二叉树
+k<-picante::multiPhylosignal(traits,myphy)#注意物种名中间的空格还是_
+#统计值 K 代表了谱系信号大小，当其为1时，表示接近布朗运动过程，有一定的保守性；
+#接近于0时表示为一定程度的随机；当 K 值大于1时，表示有强烈的谱系信号，谱系关系收敛
+write.csv(k,"c:/d/r/meili2/phy signal.csv")
+
+
+#插值 二次项 非插值对比####
+t<-NULL
+t<-as.data.frame(array(dim=c(51,15)))
+for (i in 1:15) {
+  t[,i]<-l.y[[i]][[1]]
+}
+names(t)<-names(l.y)
+t<-cbind(t,l.x[[1]])
+
+t2<-xinfo.plot[,2:14]
+t2[,14]<-ses.alpha.pd.plot[-alpha.exclude,6]
+t2[,15]<-ses.alpha.mpd.plot[-alpha.exclude,6]
+t2[,16]<-ses.alpha.mntd.plot[-alpha.exclude,6]
+t2[,17]<-ses.alpha.mfd.plot[-alpha.exclude,6]
+t2[,18]<-ses.alpha.mnfd.plot[-alpha.exclude,6]
+names(t2)[14:18]<-c("sespd","sesmpd","sesmntd","sesmfd","sesmnfd")
+names(t2)[1:4]<-c("P","H","A","sr")
+yn<-names(t2)[4:18]
+
+
+i12<-function(d,term){
+rs<-NULL
+
+d<-t2
+term<-2
+for (i in 1:length(yn)) {
+  i<-1
+x<-d  
+y<-as.matrix(d[yn[i]])
+ifelse(term==1,
+       glmd <- lm(y~P+A+H, data = x),
+       glmd <- lm(y~P+A+H+I(P^2)+I(A^2)+I(H^2), data = x)
+       )
+#glmd <- lm(y~P+A+H, data = x)#创建总模型
+options(na.action = na.fail)#设置NA处理方法
+dre.obj<-MuMIn::dredge(glmd, beta = "sd", evaluate = TRUE,rank = "AICc",extra = "adjR^2")#extra调出附加值r方
+
+rs <- rbind(rs, data.frame(
+  y = yn[i],#变量名字
+  w = round(dre.obj$weight[1], 3),#最优模型权重
+  r = round(dre.obj$`adjR^2`[1], 3)#最优r2
+))
+}
+return(rs)
+}
+ri1<-i12(t,1)
+ri2<-i12(t,2)
+r1<-i12(t2,1)
+r2<-i12(t2,2)
+ri1
+ri2
+r1
+r2
+path<-paste("C:/D/r/meili2/jpg/插值不插值和次方对比",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.6/3,height=8.27/2)
+
+plot(r1[,2],ylim=c(0,1),col="black",pch=19,type="b",xlim=c(1,20),ylab="",xlab="",main="Best model weight")
+points(r2[,2],col="red",pch=19,type="b")
+points(ri1[,2],col="blue",pch=19,type="b")
+points(ri2[,2],col="orange",pch=19,type="b")
+legend(legend=c("original, linear","original, quadratic","interpolated, linear","interpolated, quadratic"),
+       col=c("black","red","blue","orange"),
+       x=14,y=1,bty="n",lty=c(1,1,1),lwd=2,cex=0.7
+       )
+dev.off()
+
+
+#betapart ####
+#十个尺度betapart计算####
+b.sr.10<-b.pd.10<-b.fd.10<-NULL
+for (i in 1:10) {
+b.sr.10[[i]]<-betapart::           beta.pair(l.m01no[[i]],index.family="sorensen")
+b.pd.10[[i]]<-betapart::     phylo.beta.pair(l.m01[[i]],ml.tree$scenario.3,index.family="sorensen")#默认index.family="sorensen"
+b.fd.10[[i]]<-betapart::functional.beta.pair(l.m01no[[i]], sp_faxes_coord_ml[,1:4],index.family="sorensen")#默认index.family="sorensen"
+}#67.50s
+#[[1]]turnover #[[2]]nest#[[3]]总
+
+#三个尺度betapart计算####
+b.sr.pcv<-b.pd.pcv<-b.fd.pcv<-NULL
+  b.sr.pcv[[1]]<-betapart::           beta.pair(m01_plot_[-beta.exclude.row,],index.family="sorensen")
+  b.pd.pcv[[1]]<-betapart::     phylo.beta.pair(m01_plot_[-beta.exclude.row,],ml.tree$scenario.3,index.family="sorensen")#默认index.family="sorensen"
+  b.fd.pcv[[1]]<-betapart::functional.beta.pair(m01_plot[-beta.exclude.row,], sp_faxes_coord_ml[,1:4],index.family="sorensen")#默认index.family="sorensen"
+  b.sr.pcv[[2]]<-betapart::           beta.pair(m01_comm_[-8,],index.family="sorensen")
+  b.pd.pcv[[2]]<-betapart::     phylo.beta.pair(m01_comm_[-8,],ml.tree$scenario.3,index.family="sorensen")#默认index.family="sorensen"
+  b.fd.pcv[[2]]<-betapart::functional.beta.pair(m01_comm[-8,], sp_faxes_coord_ml[,1:4],index.family="sorensen")#默认index.family="sorensen"
+  b.sr.pcv[[3]]<-betapart::           beta.pair(m01_vege_,index.family="sorensen")
+  b.pd.pcv[[3]]<-betapart::     phylo.beta.pair(m01_vege_,ml.tree$scenario.3,index.family="sorensen")#默认index.family="sorensen"
+  b.fd.pcv[[3]]<-betapart::functional.beta.pair(m01_vege, sp_faxes_coord_ml[,1:4],index.family="sorensen")#默认index.family="sorensen"
+  t<-proc.time()
+  
+#样方、群落、植被尺度下的物种、系统发育和功能betapart####
+
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的物种-系统发育-功能beta",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+  
+par(mfrow=c(3,3),mar=c(4,5,5,0.5))   
+beta.plot(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.sr.pcv[[1]][[1]],
+          log(dist(xinfo_comm[-8               ,2])+1),b.sr.pcv[[2]][[1]],
+          log(dist(xinfo_vege[                 ,2])+1),b.sr.pcv[[3]][[1]],"Ln transformed elevation distance","beta.sr","Turnover")
+beta.plot(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.sr.pcv[[1]][[2]],
+          log(dist(xinfo_comm[-8               ,2])+1),b.sr.pcv[[2]][[2]],
+          log(dist(xinfo_vege[                 ,2])+1),b.sr.pcv[[3]][[2]],"Ln transformed elevation distance","beta.sr","Nestedness")
+beta.plot(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.sr.pcv[[1]][[3]],
+          log(dist(xinfo_comm[-8               ,2])+1),b.sr.pcv[[2]][[3]],
+          log(dist(xinfo_vege[                 ,2])+1),b.sr.pcv[[3]][[3]],"Ln transformed elevation distance","beta.sr","Total")
+
+beta.plot(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.pd.pcv[[1]][[1]],
+          log(dist(xinfo_comm[-8               ,2])+1),b.pd.pcv[[2]][[1]],
+          log(dist(xinfo_vege[                 ,2])+1),b.pd.pcv[[3]][[1]],"Ln transformed elevation distance","beta.pd","Turnover")
+beta.plot(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.pd.pcv[[1]][[2]],
+          log(dist(xinfo_comm[-8               ,2])+1),b.pd.pcv[[2]][[2]],
+          log(dist(xinfo_vege[                 ,2])+1),b.pd.pcv[[3]][[2]],"Ln transformed elevation distance","beta.pd","Nestedness")
+beta.plot(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.pd.pcv[[1]][[3]],
+          log(dist(xinfo_comm[-8               ,2])+1),b.pd.pcv[[2]][[3]],
+          log(dist(xinfo_vege[                 ,2])+1),b.pd.pcv[[3]][[3]],"Ln transformed elevation distance","beta.pd","Total")
+
+beta.plot(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.fd.pcv[[1]][[1]],
+          log(dist(xinfo_comm[-8               ,2])+1),b.fd.pcv[[2]][[1]],
+          log(dist(xinfo_vege[                 ,2])+1),b.fd.pcv[[3]][[1]],"Ln transformed elevation distance","beta.fd","Turnover")
+beta.plot(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.fd.pcv[[1]][[2]],
+          log(dist(xinfo_comm[-8               ,2])+1),b.fd.pcv[[2]][[2]],
+          log(dist(xinfo_vege[                 ,2])+1),b.fd.pcv[[3]][[2]],"Ln transformed elevation distance","beta.fd","Nestedness")
+beta.plot(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.fd.pcv[[1]][[3]],
+          log(dist(xinfo_comm[-8               ,2])+1),b.fd.pcv[[2]][[3]],
+          log(dist(xinfo_vege[                 ,2])+1),b.fd.pcv[[3]][[3]],"Ln transformed elevation distance","beta.fd","Total")
+par(mfrow=c(1,1))
+dev.off()
+summary(lm(dtc(b.fd.pcv[[1]][[1]])~dtc(log(dist(xinfo_plot[-beta.exclude.row,2])+1))))[[4]][2,1]
+
+#样方群落植被尺度的beta海拔斜率####
+beta.slope<-function(x1,y1,x2,y2,x3,y3,xname="",yname="",mainname="") {
+  ifelse(
+    mainname=="",
+         return(
+           data.frame(
+             slope.p = summary(lm(dtc(y1) ~ dtc(x1)))[[4]][2, 1],
+             slope.c = summary(lm(dtc(y2) ~ dtc(x2)))[[4]][2, 1],
+             slope.v = summary(lm(dtc(y3) ~ dtc(x3)))[[4]][2, 1],
+             name = yname
+             )),
+         return(
+           data.frame(
+             slope.p = summary(lm(dtc(y1) ~ dtc(x1)))[[4]][2, 1],
+             slope.c = summary(lm(dtc(y2) ~ dtc(x2)))[[4]][2, 1],
+             slope.v = summary(lm(dtc(y3) ~ dtc(x3)))[[4]][2, 1],
+             name = paste(mainname, yname, sep = " of ")
+        ))
+         )
+}
+
+beta.slp<-rbind(
+  beta.slope(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.sr.pcv[[1]][[1]],
+            log(dist(xinfo_comm[-8               ,2])+1),b.sr.pcv[[2]][[1]],
+            log(dist(xinfo_vege[                 ,2])+1),b.sr.pcv[[3]][[1]],"Ln transformed elevation distance","beta.sr","Turnover"),
+  beta.slope(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.sr.pcv[[1]][[2]],
+            log(dist(xinfo_comm[-8               ,2])+1),b.sr.pcv[[2]][[2]],
+            log(dist(xinfo_vege[                 ,2])+1),b.sr.pcv[[3]][[2]],"Ln transformed elevation distance","beta.sr","Nestedness"),
+  beta.slope(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.sr.pcv[[1]][[3]],
+            log(dist(xinfo_comm[-8               ,2])+1),b.sr.pcv[[2]][[3]],
+            log(dist(xinfo_vege[                 ,2])+1),b.sr.pcv[[3]][[3]],"Ln transformed elevation distance","beta.sr","Total"),
+  
+  beta.slope(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.pd.pcv[[1]][[1]],
+            log(dist(xinfo_comm[-8               ,2])+1),b.pd.pcv[[2]][[1]],
+            log(dist(xinfo_vege[                 ,2])+1),b.pd.pcv[[3]][[1]],"Ln transformed elevation distance","beta.pd","Turnover"),
+  beta.slope(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.pd.pcv[[1]][[2]],
+            log(dist(xinfo_comm[-8               ,2])+1),b.pd.pcv[[2]][[2]],
+            log(dist(xinfo_vege[                 ,2])+1),b.pd.pcv[[3]][[2]],"Ln transformed elevation distance","beta.pd","Nestedness"),
+  beta.slope(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.pd.pcv[[1]][[3]],
+            log(dist(xinfo_comm[-8               ,2])+1),b.pd.pcv[[2]][[3]],
+            log(dist(xinfo_vege[                 ,2])+1),b.pd.pcv[[3]][[3]],"Ln transformed elevation distance","beta.pd","Total"),
+  
+  beta.slope(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.fd.pcv[[1]][[1]],
+            log(dist(xinfo_comm[-8               ,2])+1),b.fd.pcv[[2]][[1]],
+            log(dist(xinfo_vege[                 ,2])+1),b.fd.pcv[[3]][[1]],"Ln transformed elevation distance","beta.fd","Turnover"),
+  beta.slope(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.fd.pcv[[1]][[2]],
+            log(dist(xinfo_comm[-8               ,2])+1),b.fd.pcv[[2]][[2]],
+            log(dist(xinfo_vege[                 ,2])+1),b.fd.pcv[[3]][[2]],"Ln transformed elevation distance","beta.fd","Nestedness"),
+  beta.slope(log(dist(xinfo_plot[-beta.exclude.row,2])+1),b.fd.pcv[[1]][[3]],
+            log(dist(xinfo_comm[-8               ,2])+1),b.fd.pcv[[2]][[3]],
+            log(dist(xinfo_vege[                 ,2])+1),b.fd.pcv[[3]][[3]],"Ln transformed elevation distance","beta.fd","Total")
+ 
+)
+beta.slp
+#beta.slp<-beta.slp[order(as.numeric(rownames(beta.slp))),]
+beta.slp<-beta.slp[c(1,4,7,2,5,8,3,6,9),]
+
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度斜率",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69/2,height=8.27/1.75)
+par(mar=c(4,5,5,0.5))
+
+plot(beta.slp[,3],type="no",xlab="",ylab="Coefficients",cex.lab=2,cex.axis=1.5)
+for (i in 1:3) {points(beta.slp[,i],type="b",col=color[1+3*(i-1)],cex=2,lwd=2,pch=19)  }
+legend(  x ="topright", legend = c("Plot level", "Community level","Vegetation level"),lty = c(1, 1,1),   col = color[c(1,4,7)],  lwd = 3,bty="n")   #bty="n"无边框
+dev.off()
+write.csv(beta.slp,file="c:/d/r/meili2/table/slope3.csv")
+#样方、群落、植被尺度下的谱系功能beta mpd mntd beta mfd mnfd####
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的谱系功能beta mpd mntd beta mfd mnfd",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69,height=8.27)
+par(mfrow=c(2,2),mar=c(4,5,5,0.5))  
+beta.plot(log(dist(xinfo_plot[,2])+1),beta.mpd.plot,
+          log(dist(xinfo_comm[,2])+1),beta.mpd.comm,
+          log(dist(xinfo_vege[,2])+1),beta.mpd.vege,"Ln transformed elevation distance","beta.mpd","")
+beta.plot(log(dist(xinfo_plot[,2])+1),beta.mntd.plot,
+          log(dist(xinfo_comm[,2])+1),beta.mntd.comm,
+          log(dist(xinfo_vege[,2])+1),beta.mntd.vege,"Ln transformed elevation distance","beta.mntd","")
+
+beta.plot(log(dist(xinfo_plot[,2])+1),beta.mfd.plot,
+          log(dist(xinfo_comm[,2])+1),beta.mfd.comm,
+          log(dist(xinfo_vege[,2])+1),beta.mfd.vege,"Ln transformed elevation distance","beta.mfd","")
+beta.plot(log(dist(xinfo_plot[,2])+1),beta.mnfd.plot,
+          log(dist(xinfo_comm[,2])+1),beta.mnfd.comm,
+          log(dist(xinfo_vege[,2])+1),beta.mnfd.vege,"Ln transformed elevation distance","beta.mnfd","")
+par(mfrow=c(1,1))
+dev.off()
+
+#三尺度boxplot九宫格####
+#九宫格，每一行是同一个尺度，每一列是同一个组分
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的beta 九宫格1",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+
+par(mfrow=c(3,3),mar=c(4,5,5,0.5))
+for (j in 1:3) {#尺度
+  for (i in 1:3) {#组分
+mn<-c("Turnover","Nestedness","Total")
+bp<-rbind(data.frame(y=dtc(b.sr.pcv[[j]][[i]]),n="sr"),data.frame(y=dtc(b.pd.pcv[[j]][[i]]),n="pd"),data.frame(y=dtc(b.fd.pcv[[j]][[i]]),n="fd"))
+boxplot(y ~ n, data = bp, xlab = "", ylab = "beta diversity",main=paste(scl.names[j],mn[i],sep="-"),col=color[c(1,4,10)],cex.lab=2,cex.axis=1.5,cex.main=2)
+  }
+}
+remove(bp)
+dev.off()
+#九宫格，每一行是同一个维度，每一列是同一个组分
+path<-paste("C:/D/r/meili2/jpg/样方-群落-植被尺度下的beta 九宫格2",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+
+par(mfrow=c(3,3),mar=c(4,5,5,0.5))
+mn<-c("Turnover","Nestedness","Total")
+dn<-c("beta.sr","beta.pd","beta.fd")
+s.level<-c("Plot","Community","Vegetation")
+for (i in 1:3) {#组分
+  bp<-rbind(data.frame(y=dtc(b.sr.pcv[[1]][[i]]),n=s.level[1]),
+            data.frame(y=dtc(b.sr.pcv[[2]][[i]]),n=s.level[2]),
+            data.frame(y=dtc(b.sr.pcv[[3]][[i]]),n=s.level[3]))
+  bp$n <- factor(bp$n, levels = s.level)
+  boxplot(y ~ n, data = bp, xlab = "", ylab = dn[1],main=mn[i],col=color[c(1,4,10)],cex.lab=2,cex.axis=1.5,cex.main=2)
+}
+for (i in 1:3) {#组分
+  bp<-rbind(data.frame(y=dtc(b.pd.pcv[[1]][[i]]),n=s.level[1]),
+            data.frame(y=dtc(b.pd.pcv[[2]][[i]]),n=s.level[2]),
+            data.frame(y=dtc(b.pd.pcv[[3]][[i]]),n=s.level[3]))
+  bp$n <- factor(bp$n, levels = s.level)
+  boxplot(y ~ n, data = bp, xlab = "", ylab = dn[2],main=mn[i],col=color[c(1,4,10)],cex.lab=2,cex.axis=1.5,cex.main=2)
+}
+for (i in 1:3) {#组分
+  bp<-rbind(data.frame(y=dtc(b.fd.pcv[[1]][[i]]),n=s.level[1]),
+            data.frame(y=dtc(b.fd.pcv[[2]][[i]]),n=s.level[2]),
+            data.frame(y=dtc(b.fd.pcv[[3]][[i]]),n=s.level[3]))
+  bp$n <- factor(bp$n, levels = s.level)
+  boxplot(y ~ n, data = bp, xlab = "", ylab = dn[3],main=mn[i],col=color[c(1,4,10)],cex.lab=2,cex.axis=1.5,cex.main=2)
+}
+remove(bp)
+dev.off()
+
+#十尺度boxplot九宫格####
+path<-paste("C:/D/r/meili2/jpg/10分辨率betapart 九宫格",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+
+par(mfrow=c(3,3),mar=c(4,5,5,0.5))
+mn<-c("Turnover","Nestedness","Total")
+dn<-c("beta.sr","beta.pd","beta.fd")
+s.level<-c("Plot","Community","Vegetation")
+
+for (i in 1:3) {#组分
+  bp<-NULL
+  for (j in 1:10) {  bp<-rbind(bp,data.frame(y=dtc(b.sr.10[[j]][[i]]),n=paste(50*j,"m",sep="")))}
+  bp$n <- factor(bp$n, levels = paste(seq(50,500,by=50),"m",sep=""))
+  bp<-na.omit(bp)
+  boxplot(y ~ n, data = bp, xlab = "", ylab = dn[1],main=mn[i],col=color[1:10],cex.lab=2,cex.axis=1.5,cex.main=2)
+}
+for (i in 1:3) {#组分
+  bp<-NULL
+  for (j in 1:10) {  bp<-rbind(bp,data.frame(y=dtc(b.sr.10[[j]][[i]]),n=paste(50*j,"m",sep="")))}
+  bp$n <- factor(bp$n, levels = paste(seq(50,500,by=50),"m",sep=""))
+  bp<-na.omit(bp)
+  boxplot(y ~ n, data = bp, xlab = "", ylab = dn[2],main=mn[i],col=color[1:10],cex.lab=2,cex.axis=1.5,cex.main=2)
+}
+for (i in 1:3) {#组分
+  bp<-NULL
+  for (j in 1:10) {  bp<-rbind(bp,data.frame(y=dtc(b.fd.10[[j]][[i]]),n=paste(50*j,"m",sep="")))}
+  bp$n <- factor(bp$n, levels = paste(seq(50,500,by=50),"m",sep=""))
+  bp<-na.omit(bp)
+  boxplot(y ~ n, data = bp, xlab = "", ylab = dn[3],main=mn[i],col=color[1:10],cex.lab=2,cex.axis=1.5,cex.main=2)
+}
+
+remove(bp)
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/10分辨率betapart 九宫格-海拔距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+
+par(mfrow=c(3,3),mar=c(4,5,5,0.5))
+for (j in 1:3) {
+plot(1,1,type="no",xlim=c(min(log(dtc(l.d.e[[i]])+1)),8),ylim=c(0,1),xlab="Ln transformed elevation distance",ylab=dn[1],main=comp.names[j],cex.main=3,cex.lab=2,cex.axis=1.5)
+for (i in 1:10) {points(log(dtc(l.d.e[[i]])+1),dtc(b.sr.10[[i]][[j]]),pch=19,col=color[i],cex=1.3)}
+for (i in 1:10) {plot.trendl.pr(log(dtc(l.d.e[[i]])+1),dtc(b.sr.10[[i]][[j]]),lcol=color[i],lwidth=2,type="no",term=1)}
+legend(x=7.5,y=0.8,legend=paste(seq(50,500,by=50),"m",sep=""),cex=1,lty=1,col=color,lwd =3,bty="n",y.intersp = 1.45)   #
+}
+
+for (j in 1:3) {
+  plot(1,1,type="no",xlim=c(min(log(dtc(l.d.e[[i]])+1)),8.2),ylim=c(0,1),xlab="Ln transformed elevation distance",ylab=dn[2],main=comp.names[j],cex.main=3,cex.lab=2,cex.axis=1.5)
+  for (i in 1:10) {points(log(dtc(l.d.e[[i]])+1),dtc(b.pd.10[[i]][[j]]),pch=19,col=color[i],cex=1.3)}
+  for (i in 1:10) {plot.trendl.pr(log(dtc(l.d.e[[i]])+1),dtc(b.pd.10[[i]][[j]]),lcol=color[i],lwidth=2,type="no",term=1)}
+  legend(x=7.8,y=0.8,legend=paste(seq(50,500,by=50),"m",sep=""),cex=1,lty=1,col=color,lwd =3,bty="n",y.intersp = 1.45)   #
+}
+
+for (j in 1:3) {
+  plot(1,1,type="no",xlim=c(min(log(dtc(l.d.e[[i]])+1)),8.2),ylim=c(0,1),xlab="Ln transformed elevation distance",ylab=dn[3],main=comp.names[j],cex.main=3,cex.lab=2,cex.axis=1.5)
+  for (i in 1:10) {points(log(dtc(l.d.e[[i]])+1),dtc(b.fd.10[[i]][[j]]),pch=19,col=color[i],cex=1.3)}
+  for (i in 1:10) {plot.trendl.pr(log(dtc(l.d.e[[i]])+1),dtc(b.fd.10[[i]][[j]]),lcol=color[i],lwidth=2,type="no",term=1)}
+  legend(x=7.8,y=0.8,legend=paste(seq(50,500,by=50),"m",sep=""),cex=1,lty=1,col=color,lwd =3,bty="n",y.intersp = 1.45)   #
+}
+dev.off()
+
+#十尺度beta-海拔斜率####
+
+r1<-NULL
+for (j in 1:3) {
+  for (i in 1:10) {
+    r1<-rbind(r1,data.frame(s=summary(lm(dtc(b.sr.10[[i]][[j]])~log(dtc(l.d.e[[i]])+1)))[[4]][2,1],name=paste(comp.names[j],dn[1],sep="-"),res=50*i))
+  }}
+r1
+r2<-NULL
+for (j in 1:3) {
+  for (i in 1:10) {
+    r2<-rbind(r2,data.frame(s=summary(lm(dtc(b.pd.10[[i]][[j]])~log(dtc(l.d.e[[i]])+1)))[[4]][2,1],name=paste(comp.names[j],dn[2],sep="-"),res=50*i))
+  }}
+r2
+r3<-NULL
+for (j in 1:3) {
+  for (i in 1:10) {
+    r3<-rbind(r3,data.frame(s=summary(lm(dtc(b.fd.10[[i]][[j]])~log(dtc(l.d.e[[i]])+1)))[[4]][2,1],name=paste(comp.names[j],dn[3],sep="-"),res=50*i))
+  }}
+r3
+r<-rbind(r1,r2,r3)
+r<-r[order(r[,2]),]
+r<-r[order(r[,3]),]
+r
+
+path<-paste("C:/D/r/meili2/jpg/10分辨率-斜率 ",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69/2,height=8.27/1.75)
+par(mar=c(4,5,5,0.5))
+plot(r[,1],xlim=c(1,9),xlab="",ylab="Coefficients",cex.lab=2,cex.axis=1.5)
+for (i in 1:10) {points(r[(9*i-8):(9*i),1],col=color[i],pch=19,type="b",lwd=2)}
+legend(x=1.3,y=0.4,legend=paste(seq(50,500,by=50),"m",sep=""),cex=1,lty=1,col=color,lwd =3,bty="n",y.intersp = 0.7)   #
+dev.off()
+
+write.csv(r,file="c:/d/r/meili2/table/slope10.csv")
+
+#测试功能pca轴能否变少####
+  test<-NULL
+  for (i in 2:4) {
+    test[[i]]<-betapart::functional.beta.pair(m01_plot[-beta.exclude.row,], sp_faxes_coord_ml[,1:i,drop=F],index.family="sorensen")#默认index.family="sorensen"
+  }#524s
+  proc.time()-t 
+  par(mfrow=c(1,4))
+  plot(b.e[[1]],test[[2]][[3]])#faxes两根轴
+  plot(b.e[[1]],test[[3]][[3]])#faxes3根轴
+  plot(b.e[[1]],test[[4]][[3]])#faxes4根轴
+  plot(b.e[[1]],b.fd.pcv[[1]][[3]])
+#减少pca轴数后发现，beta会有显著变化，所以不能轴太少，所以取样单元内物种不应太p少  
+  dim(test[[3]][[3]])
+  
+  plot(1:10)
+  max(test[[3]][[3]])
+dim(xinfo_plot)
+dim(xinfo_comm)
+dim(xinfo_vege)
+#三个尺度下的四个自变量距离列表####
+#[[1]]样方,[[2]]群落[[3]]植被
+b.a<-b.h<-b.p<-b.e<-NULL
+b.a[[1]]<-dist(xinfo_plot[-beta.exclude.row,7])
+b.h[[1]]<-dist(xinfo_plot[-beta.exclude.row,6])
+b.p[[1]]<-dist(xinfo_plot[-beta.exclude.row,5])
+b.e[[1]]<-dist(scale(xinfo_plot[-beta.exclude.row,2]))
+b.a[[2]]<-dist(xinfo_comm[-8,7])
+b.h[[2]]<-dist(xinfo_comm[-8,6])
+b.p[[2]]<-dist(xinfo_comm[-8,5])
+b.e[[2]]<-dist(scale(xinfo_comm[-8,2]))
+b.a[[3]]<-dist(xinfo_vege[,7])
+b.h[[3]]<-dist(xinfo_vege[,6])
+b.p[[3]]<-dist(xinfo_vege[,5])
+b.e[[3]]<-dist(scale(xinfo_vege[,2]))
+
+plot(vegan::varpart(b.fd.pcv[[1]][[3]],
+                    b.h[[1]], 
+                    b.p[[1]],
+                    b.a[[1]]))
+
+temp<-vegan::mantel(b.e[[1]],b.p[[1]],permutations=999,method="pearson") 
+print(paste("p",temp[[4]],"        r2",round(temp[[3]],4)))
+#Significance(p)，p<0.05表明环境因子与微生物群落距离矩阵的相关性有统计学意义
+
+par(mfrow=c(3,3))
+plot(b.a[[1]],b.sr.pcv[[1]][[3]],ylim=c(0,1))
+plot(b.a[[1]],b.sr.pcv[[1]][[1]],ylim=c(0,1))
+plot(b.a[[1]],b.sr.pcv[[1]][[2]],ylim=c(0,1))
+
+plot(b.a[[1]],b.pd.pcv[[1]][[3]],ylim=c(0,1))
+plot(b.a[[1]],b.pd.pcv[[1]][[1]],ylim=c(0,1))
+plot(b.a[[1]],b.pd.pcv[[1]][[2]],ylim=c(0,1))
+
+plot(b.a[[1]],b.fd.pcv[[1]][[3]],ylim=c(0,1))
+plot(b.a[[1]],b.fd.pcv[[1]][[1]],ylim=c(0,1))
+plot(b.a[[1]],b.fd.pcv[[1]][[2]],ylim=c(0,1))
+par(mfrow=c(1,1))
+
+
+dist(xinfo_vege[,2])
+#[[1]]turnover #[[2]]nest#[[3]]总
+
+
+out1 <- adespatial::beta.div.comp(l.m01no[[1]], coef = 'S', quant = FALSE)
+summary(out1)
+out1$part#相对重要性
+
+turnpart<-function(list,n=10){
+r<-NULL
+for (i in 1:n) {
+  r<-rbind(r,data.frame(res=50*i,turn=print(sum(list[[i]][[1]])/sum(list[[i]][[3]]))))
+}
+return(r)}#计算相对重要性 
+turn.part<-turnpart(b.sr.10)
+turn.part<-data.frame(turn.part,turnpart(b.pd.10)[,2])
+turn.part<-data.frame(turn.part,turnpart(b.fd.10)[,2])
+turn.part
+
+par(mfrow=c(1,1))
+
+plot(turn.part[,1],turn.part[,2],ylim=c(0,1))
+plot.trendl.pr(turn.part[,1],turn.part[,2])
+points(turn.part[,1],turn.part[,3],pch=19,col="orange")
+plot.trendl.pr(turn.part[,1],turn.part[,3])
+points(turn.part[,1],turn.part[,4],pch=19,col="steelblue")
+plot.trendl.pr(turn.part[,1],turn.part[,4])
+
+par(mfrow=c(1,2))
+
+plot(b.sr.10[[1]][[3]],b.pd.10[[1]][[3]],ylim=c(0,1))
+plot(b.sr.10[[1]][[3]],b.fd.10[[1]][[3]],ylim=c(0,1))
+#beta.pd-beta.sr相关图####
+par(mfrow=c(1,1))
+for (i in 3:3) {
+plot(b.sr.pcv[[1]][[i]],b.fd.pcv[[1]][[i]],ylim=c(0,1),xlim=c(0,1),xlab="Beta.sr",ylab="Beta.fd",main=comp.names[i],cex.lab=2,cex.main=3,cex.axis=1.5)
+plot.trendl.pr(b.sr.pcv[[1]][[i]],b.pd.pcv[[1]][[i]])
+abline(0,1,lty=2) 
+   
+}
+vegan::mantel(b.sr.pcv[[1]][[i]],b.pd.pcv[[1]][[i]])
+
+
+######################################################################################
+#按生活型拆分####
+climcomp1<-data.frame(E=for_averageif[,1],C=predict(prcomp(for_averageif[,2:20],center = T,scale=T))[,1,drop=F])#气候第一主成分
+climcomp2<-data.frame(E=for_averageif[,1],C=predict(prcomp(for_averageif[,2:20],center = T,scale=T))[,2,drop=F])#气候第2主成分
+
+l.ml<-l.m01<-l.ele<-l.b.sr.ttshw<-l.b.e.ttshw<-l.b.c.ttshw<-NULL 
+
+l.ml[[1]]<-ml
+l.ml[[2]]<-ml[ml$Life_form=="Herb",]
+l.ml[[3]]<-ml[(ml$Life_form=="Tree"|ml$Life_form=="Shrub"),]
+
+l.ml[[4]]<-ml[ml$Group=="Angiosperms",]
+l.ml[[5]]<-ml[ml$Group=="Gymnosperms",]
+l.ml[[6]]<-ml[ml$Group=="Ferns and lycophytes",]
+
+l.ml[[7]]<-ml[ml$Areal_type=="Temperate",]
+l.ml[[8]]<-ml[ml$Areal_type=="Tropical",]
+l.ml[[9]]<-ml[ml$Areal_type=="Cosmopolitan",]
+
+lf.names<-c("Overall","Herb","Woody",
+            "Angiosperms","Gymnosperms","Ferns and lycophytes",
+            "Temperate","Tropical","Cosmopolitan")
+comp.names<-c("Turnover","Nestedness","Total")
+
+#计算各生活型的样方信息表、01矩阵、物种beta多样性、海拔距离、气候距离####
+for (i in 1:9) { 
+  l.m01[[i]]<-columtomatrix(unique(l.ml[[i]][,c( 3,2)]))#样方-物种01矩阵
+  l.ele[[i]]<-unique(l.ml[[i]][,c(2,17)])[order(unique(l.ml[[i]][,c(2,17)])[,1]),2]#横坐标海拔
+  l.b.sr.ttshw[[i]]<-betapart::           beta.pair(l.m01[[i]],index.family="sorensen")#物种层面的beta多样性及分解
+  l.b.e.ttshw[[i]]<-dist(l.ele[[i]])#各组海拔距离列表
+  l.b.c.ttshw[[i]]<-dist(l.clim[[i]])
+  #plot(l.ele[[i]],rowSums(l.m01[[i]]),main=lf.names[i],pch=19,ylab="Species richness",xlab="Elevation (m)",cex.lab=1.5,cex.axis=1.5,cex.main=2)
+  # plot.trendl.pr(l.ele[[i]],rowSums(l.m01[[i]]),term=1,lcol="red")
+ # plot.trendl.pr(l.ele[[i]],rowSums(l.m01[[i]]),term=2)
+}
+
+l.b.c2.ttshw<-NULL
+for (i in 1:9) { 
+  l.b.c2.ttshw[[i]]<-dist(l.clim2.g9[[i]])
+}
+
+
+
+l.clim<-l.ele#相同大小，占位
+#计算各组各海拔位置的气候值列表
+for (i in 1:length(l.ele)) {
+  for (j in 1:length(l.ele[[i]])) {
+    l.clim[[i]][j]<-climcomp1[climcomp1[,1]==l.ele[[i]][j],2]
+  }
+}
+
+#物种alpha####
+path<-paste("C:/D/r/meili2/jpg/物种-alpha分组",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+
+par(mfrow=c(3,3))
+for (i in 1:9) { 
+  plot(l.ele[[i]],rowSums(l.m01[[i]]),main=lf.names[i],pch=19,ylab="Species richness",xlab="Elevation (m)",cex.lab=1.5,cex.axis=1.5,cex.main=2)
+ # plot.trendl.pr(l.ele[[i]],rowSums(l.m01[[i]]),term=1,lcol="red")
+  plot.trendl.pr(l.ele[[i]],rowSums(l.m01[[i]]),term=2)
+}
+dev.off()
+#物种alpha和气候关系####
+l.clim2.g9<-l.clim.g9<-NULL#气候第一主成分和第二主成分计算9种分组的列表
+for (i in 1:9) {
+  t<-NULL
+  for (j in 1:length(l.ele[[i]])) {
+    t<-rbind(t,climcomp1[climcomp1[,1]==l.ele[[i]][j],2])
+  }
+  l.clim.g9[[i]]<-as.vector(t)
+  t<-NULL
+  for (j in 1:length(l.ele[[i]])) {
+    t<-rbind(t,climcomp2[climcomp2[,1]==l.ele[[i]][j],2])
+  }
+  l.clim2.g9[[i]]<-as.vector(t)
+  
+}
+
+
+y<-rowSums(l.m01[[i]])
+x<-l.clim.g9[[i]]
+
+
+t1<-NULL
+for (i in 1:9) {
+   t1<-rbind(t1,rp(l.clim.g9[[i]],l.clim2.g9[[i]],rowSums(l.m01[[i]]),term=1))
+   }
+t2<-NULL
+for (i in 1:9) {
+  t2<-rbind(t2,rp(l.clim.g9[[i]],l.clim2.g9[[i]],rowSums(l.m01[[i]]),term=2))
+}
+
+ write.csv(data.frame(Observed_richness=lf.names,Linear_model=t1,Quadratic_model=t2),
+           file="c:/d/r/meili2/table/sr-alpha-cor.csv")
+ 
+#物种分布范围####
+ path<-paste("C:/D/r/meili2/jpg/物种分布范围",Sys.Date(),".pdf",sep="_")
+ pdf(path,width=11.69/2.5,height=8.27/2)  
+ 
+ par(mfrow=c(1,1),mar=c(4,5,5,0.5))
+ barplot((slh[,3]-slh[,2])[order(slh[,3]-slh[,2])],xlab="Speceis1-Speceis407",ylab="Elevational range",cex.lab=1.5,cex.axis=1.5)
+ dev.off()
+#物种beta####
+ 
+ 
+path<-paste("C:/D/r/meili2/jpg/物种-beta分组-海拔距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+
+par(mfrow=c(3,3))
+for (j in 1:3) {
+  for (i in 1:3) {
+    plot(log(l.b.e.ttshw[[j]]), l.b.sr.ttshw[[j]][[i]],ylim=c(0,1.2),main=paste(lf.names[j],comp.names[i],sep="-"),
+         col=rgb(90,90,90,a=30,max = 255),pch=19,ylab="Observed dissimilarity",xlab="Ln-transformed elevation distance",cex.lab=1.5,cex.axis=1.5,cex.main=2)
+  plot.trendl.pr(log(l.b.e.ttshw[[j]]+1), l.b.sr.ttshw[[j]][[i]],lcol="black")
+    }
+}
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/物种-beta分组-气候距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+
+par(mfrow=c(3,3))
+for (j in 1:3) {
+  for (i in 1:3) {
+    plot(log(l.b.c.ttshw[[j]]), l.b.sr.ttshw[[j]][[i]],ylim=c(0,1.2),main=paste(lf.names[j],comp.names[i],sep="-"),
+         col=rgb(90,90,90,a=30,max = 255),pch=19,ylab="Observed dissimilarity",xlab="Ln-transformed climate distance",cex.lab=1.5,cex.axis=1.5,cex.main=2)
+    plot.trendl.pr(log(l.b.c.ttshw[[j]]+0.001), l.b.sr.ttshw[[j]][[i]],lcol="black")
+  }
+}
+dev.off()
+
+#Error in lm.fit(x, y, offset = offset, singular.ok = singular.ok, ...) : 
+#NA/NaN/Inf in 'x'
+#x取了log之后，海拔差为0的log会变成负无穷，无法拟合
+
+#物种beta mantel####
+mantel.rst2<-function(listx,listy,xnames,offset=0.001){
+  #list<-betalist.comm
+  mrst<-NULL#mantel result
+  for (j in 1:3) {
+    for (i in 1:3) {
+      temp<-vegan::mantel(log(listx[[j]]+offset), listy[[j]][[i]],permutations=9999,method="pearson") 
+      ifelse(
+        round(temp[[4]],3)<=0.05,
+        mrst<-rbind(mrst,data.frame(y=paste(lf.names[j],comp.names[i],sep="-"),x=xnames,stat=paste(round(temp[[3]],3),"*"))),
+        mrst<-rbind(mrst,data.frame(y=paste(lf.names[j],comp.names[i],sep="-"),x=xnames,stat=round(temp[[3]],3)))
+      )
+    }
+  }
+  return(mrst) 
+}#输入betalist,提取各beta多样性之间mantel test
+m1<-mantel.rst2(l.b.c.ttshw,l.b.sr.ttshw,"Climate1 distance")
+m3<-mantel.rst2(l.b.c2.ttshw,l.b.sr.ttshw,"Climate2 distance")
+m2<-mantel.rst2(l.b.e.ttshw,l.b.sr.ttshw,"Elevation distance",1)
+write.csv(cbind(m1,m3,m2),file="c:/d/r/meili2/sr-beta-mantel11-12.csv")
+
+
+#谱系alpha计算####
+
+l.splistforV2<-l.ml.tree<-NULL
+l.m01_<-l.m01
+for (i in 1:6) {
+l.splistforV2[[i]]<-data.frame(unique(l.ml[[i]][,3:5]),species.relative=c(""), genus.relative=c(""))#提取种属科
+names(l.splistforV2[[i]])<-c("species","genus","family","species.relative","genus.relative")#构造5列满足Vphylo要求
+l.ml.tree[[i]] <- V.PhyloMaker2::phylo.maker(sp.list = l.splistforV2[[i]], tree = GBOTB.extended.TPL, nodes = nodes.info.1.TPL, scenarios = "S3")#建树
+names(l.m01_[[i]])<-gsub(" ","_",names(l.m01_[[i]]))
+}
+#Error in V.PhyloMaker2::phylo.maker(sp.list = l.splistforV2[[i]], tree = GBOTB.extended.TPL,  : 
+#object 'GBOTB.extended.TPL' not found
+#如果报错，手动library加载V和V2两个包
+
+#Error in UseMethod("is.rooted") :    no applicable method for 'is.rooted' 
+#是因为群落-物种表里的物种名没有加下划线
+
+l.pd.group<-l.ml_phy_dist<-l.mpd.group<-l.mntd.group<-NULL
+for (i in 1:6) {
+l.ml_phy_dist[[i]] <- cophenetic(l.ml.tree[[i]]$scenario.3)# 用树来算系统发育距离矩阵#library(picante)
+l.pd.group[[i]]<-picante::pd (l.m01_[[i]],l.ml.tree[[i]]$scenario.3)
+
+l.mpd.group[[i]]<-picante::mpd(l.m01_[[i]],l.ml_phy_dist[[i]] ,abundance.weighted=F)
+l.mntd.group[[i]]<-picante::mntd(l.m01_[[i]],l.ml_phy_dist[[i]] ,abundance.weighted=F)
+#Error in as.hclust.default(x) : argument 'x' cannot be coerced to class “hclust”Consider providing an as.hclust.phylo() method
+#是因为没有加载picante  
+}
+
+#谱系alpha画图####
+l.mpd.group[[2]][is.na(l.mpd.group[[2]])]<-mean(l.mpd.group[[2]][!is.na(l.mpd.group[[2]])])
+l.mpd.group[[3]][is.na(l.mpd.group[[3]])]<-mean(l.mpd.group[[3]][!is.na(l.mpd.group[[3]])])
+l.mntd.group[[3]][is.na(l.mntd.group[[3]])]<-mean(l.mntd.group[[3]][!is.na(l.mntd.group[[3]])])
+####处理NA
+path<-paste("C:/D/r/meili2/jpg/谱系多样性-分组1",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)  
+par(mfrow=c(3,3))
+for (i in 1:3) {
+  plot(l.ele[[i]],l.pd.group[[i]][,1],pch=19,cex.main=2,cex.lab=1.5,cex.axis=1.5,ylab="Observed pd",xlab="Elevation (m)",main=lf.names[i])
+  plot.trendl.pr(l.ele[[i]],l.pd.group[[i]][,1],term = 2)
+  plot(l.ele[[i]],l.mpd.group[[i]],pch=19,cex.main=2,cex.lab=1.5,cex.axis=1.5,ylab="Observed mpd",xlab="Elevation (m)",main=lf.names[i])
+  plot.trendl.pr(l.ele[[i]],l.mpd.group[[i]],term = 2)
+  plot(l.ele[[i]],l.mntd.group[[i]],pch=19,cex.main=2,cex.lab=1.5,cex.axis=1.5,ylab="Observed mntd",xlab="Elevation (m)",main=lf.names[i])
+  plot.trendl.pr(l.ele[[i]],l.mntd.group[[i]],term = 2)
+}
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/ses谱系多样性-分组2",Sys.Date(),".pdf",sep="_")####舍弃
+pdf(path,width=11.69*1.1,height=8.27*3/2)  
+par(mfrow=c(3,3))
+for (i in 4:6) {
+  plot(l.ele[[i]],l.pd.group[[i]][,1],pch=19,cex.main=2,cex.lab=1.5,cex.axis=1.5,ylab="Observed pd",xlab="Elevation (m)",main=lf.names[i])
+  plot(l.ele[[i]],l.mpd.group[[i]],pch=19,cex.main=2,cex.lab=1.5,cex.axis=1.5,ylab="Observed mpd",xlab="Elevation (m)",main=lf.names[i])
+  plot(l.ele[[i]],l.mntd.group[[i]],pch=19,cex.main=2,cex.lab=1.5,cex.axis=1.5,ylab="Observed mntd",xlab="Elevation (m)",main=lf.names[i])
+}
+dev.off()
+
+#谱系alpha  和环境关系cor####
+t1<-NULL
+for (i in 1:3) {
+  t1<-rbind(t1,data.frame(Observed_pd=paste(lf.names[i],"pd",sep=" "),Linear_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.pd.group[[i]][,1],term=1)))
+}
+t2<-NULL
+for (i in 1:3) {
+  t2<-rbind(t2,data.frame(Observed_pd=paste(lf.names[i],"pd",sep=" "),Quadratic_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.pd.group[[i]][,1],term=2)))
+}
+t3<-NULL
+for (i in 1:3) {
+  t3<-rbind(t3,data.frame(Observed_pd=paste(lf.names[i],"mpd",sep=" "),Linear_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.mpd.group[[i]],term=1)))
+}
+t4<-NULL
+for (i in 1:3) {
+  t4<-rbind(t4,data.frame(Observed_pd=paste(lf.names[i],"mpd",sep=" "),Quadratic_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.mpd.group[[i]],term=2)))
+}
+t5<-NULL
+for (i in 1:3) {
+  t5<-rbind(t5,data.frame(Observed_pd=paste(lf.names[i],"mntd",sep=" "),Linear_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.mntd.group[[i]],term=1)))
+}
+t6<-NULL
+for (i in 1:3) {
+  t6<-rbind(t6,data.frame(Observed_pd=paste(lf.names[i],"mntd",sep=" "),Quadratic_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.mntd.group[[i]],term=2)))
+}
+write.csv(rbind(data.frame(t1,t2),data.frame(t3,t4),data.frame(t5,t6))[,c(1,2,4)],
+          file="c:/d/r/meili2/table/pd-alpha-cor-11-12.csv")
+#谱系alpha ses 和环境关系cor####
+
+t1<-NULL
+for (i in 1:3) {
+  t1<-rbind(t1,data.frame(Observed_pd=paste(lf.names[i],"ses.pd",sep=" "),Linear_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.ses.pd.group[[i]][,6],term=1)))
+}
+t2<-NULL
+for (i in 1:3) {
+  t2<-rbind(t2,data.frame(Observed_pd=paste(lf.names[i],"ses.pd",sep=" "),Quadratic_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.ses.pd.group[[i]][,6],term=2)))
+}
+t3<-NULL
+for (i in 1:3) {
+  t3<-rbind(t3,data.frame(Observed_pd=paste(lf.names[i],"ses.mpd",sep=" "),Linear_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.ses.mpd.group[[i]][,6],term=1)))
+}
+t4<-NULL
+for (i in 1:3) {
+  t4<-rbind(t4,data.frame(Observed_pd=paste(lf.names[i],"ses.mpd",sep=" "),Quadratic_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.ses.mpd.group[[i]][,6],term=2)))
+}
+t5<-NULL
+for (i in 1:3) {
+  t5<-rbind(t5,data.frame(Observed_pd=paste(lf.names[i],"ses.mntd",sep=" "),Linear_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.ses.mntd.group[[i]][,6],term=1)))
+}
+t6<-NULL
+for (i in 1:3) {
+  t6<-rbind(t6,data.frame(Observed_pd=paste(lf.names[i],"ses.mntd",sep=" "),Quadratic_model=rp(l.clim.g9[[i]],l.clim2.g9[[i]],l.ses.mntd.group[[i]][,6],term=2)))
+}
+
+
+write.csv(rbind(data.frame(t1,t2),data.frame(t3,t4),data.frame(t5,t6))[,c(1,2,4)],
+          file="c:/d/r/meili2/table/pd-ses.alpha-cor-11-12.csv")
+#谱系ses alpha 计算####
+l.ses.pd.group<-l.ses.mpd.group<-l.ses.mntd.group<-NULL
+l.ses.pd.group[[1]]<-ses.alpha.pd.plot
+l.ses.mpd.group[[1]]<-ses.alpha.mpd.plot
+l.ses.mntd.group[[1]]<-ses.alpha.mntd.plot
+
+ t<-proc.time()
+for (i in 3:6) {
+i<-5
+l.ses.pd.group[[i]]<-  picante::ses.pd(  l.m01_[[i]],l.ml.tree[[i]]$scenario.3, null.model = "taxa.labels",  runs = 99)#900s
+l.ses.mpd.group[[i]]<- ses.mpd( l.m01_[[i]],l.ml_phy_dist[[i]],null.model = "taxa.labels",abundance.weighted=F,  runs = 99)#850s
+l.ses.mntd.group[[i]]<-ses.mntd(l.m01_[[i]],l.ml_phy_dist[[i]],null.model = "taxa.labels",abundance.weighted=F,  runs = 99)#846s
+} 
+
+proc.time()-t
+s196<-function(x1,x2){
+  segments(x1,1.96,x2,1.96,lty=2)
+  segments(x1,-1.96,x2,-1.96,lty=2)
+}
+#谱系ses alpha 画图####
+path<-paste("C:/D/r/meili2/jpg/ses谱系多样性-分组",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)  
+par(mfrow=c(3,3))
+for (i in 1:3) {
+  ses.plot.g(l.ele[[i]],l.ses.pd.group[[i]],"ses.pd",mainname=lf.names[i])
+  ses.plot.g(l.ele[[i]],l.ses.mpd.group[[i]],"ses.mpd",mainname=lf.names[i])
+  ses.plot.g(l.ele[[i]],l.ses.mntd.group[[i]],"ses.mntd",mainname=lf.names[i])
+}
+par(mfrow=c(1,1))
+dev.off()
+  
+  write.csv(cor.sig(data.frame(sr=l.pd.group[[1]][,2],pd=l.pd.group[[1]][,1],mpd=l.mpd.group[[1]],mntd=l.mntd.group[[1]]
+         )),file="c:/d/r/meili2/table/sr_pd_corsig.csv")
+
+#谱系beta计算####
+
+l.b.pd.g<-l.b.mpd.g<-l.b.mntd.g<-NULL
+for (i in 1:3) {
+l.b.pd.g[[i]]<-betapart:: phylo.beta.pair(l.m01_[[i]],l.ml.tree[[i]]$scenario.3,index.family="sorensen")#默认index.family="sorensen"
+l.b.mpd.g[[i]]<-picante::comdist(l.m01_[[i]],l.ml_phy_dist[[i]])
+l.b.mntd.g[[i]]<-picante::comdistnt(l.m01_[[i]],l.ml_phy_dist[[i]])
+}#500s
+  
+  
+#谱系beta画图####
+  t<-NULL
+for (i in 1:3) {
+  t<-rbind(t,data.frame(Species=lf.names[i],Turnover=round(sum(l.b.sr.g[[i]][[1]])/sum(l.b.pd.g[[i]][[3]]),3)))
+}
+write.csv(t,file="c:/d/r/meili2/table/turnoverpart-pd.csv")
+l.b.pd.g
+  
+path<-paste("C:/D/r/meili2/jpg/谱系-betapart分组-海拔距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2)
+  
+par(mfrow=c(3,3))
+  for (j in 1:3) {
+    for (i in 1:3) {
+      plot(log(l.b.e.ttshw[[j]]), l.b.pd.g[[j]][[i]],ylim=c(0,1.2),main=paste(lf.names[j],comp.names[i],sep="-"),
+           col=rgb(90,90,90,a=30,max = 255),pch=19,ylab="beta.pd",xlab="Ln-transformed elevation distance",cex.lab=1.5,cex.axis=1.5,cex.main=2)
+      plot.trendl.pr(log(l.b.e.ttshw[[j]]+1), l.b.pd.g[[j]][[i]],lcol="black")
+    }
+  }
+  dev.off()
+#谱系beta mantel test和线性模型####  
+  t<-NULL
+ for (j in 1:3) {
+   for (i in 1:3) {
+   #  comp.names[i],lf.names[j] 
+     t<-rbind(t,data.frame(Observed_dissimilarity=paste(lf.names[j],comp.names[i],sep="-"),Linear_model_elevation=rp(log(l.b.e.ttshw[[j]]+1),log(l.b.e.ttshw[[j]]+1), l.b.pd.g[[j]][[i]],term=1)))
+   }
+ }
+ t
+ 
+ t2<-NULL
+ for (j in 1:3) {
+   for (i in 1:3) {
+     #  comp.names[i],lf.names[j] 
+     t2<-rbind(t2,data.frame(Observed_dissimilarity=paste(lf.names[j],comp.names[i],sep="-"),Linear_model_clim=rp(log(l.b.c.ttshw[[j]]+0.0001), log(l.b.c2.ttshw[[j]]+0.0001),l.b.pd.g[[j]][[i]],term=1)))
+   }
+ }
+ t2
+ m1<-mantel.rst2(l.b.c.ttshw,l.b.pd.g,"Climate1 distance",0.0001)
+ m3<-mantel.rst2(l.b.c2.ttshw,l.b.pd.g,"Climate2 distance",0.0001)
+ m2<-mantel.rst2(l.b.e.ttshw,l.b.pd.g,"Elevation distance",1)
+ write.csv(data.frame(t,t2,m1,m3,m2),file="c:/d/r/meili2/table/pd-beta-mantel-11-12.csv")
+ 
+path<-paste("C:/D/r/meili2/jpg/谱系-mpd_mntd分组-海拔距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27*3/2) 
+par(mfrow=c(3,2))
+  for (j in 1:3) {
+   plot(log(l.b.e.ttshw[[j]]), l.b.mpd.g[[j]],ylim=c(0,1.3*max(l.b.mpd.g[[j]])),main=lf.names[j],
+           col=rgb(90,90,90,a=30,max = 255),pch=19,ylab="beta.mpd",xlab="Ln-transformed elevation distance",cex.lab=1.5,cex.axis=1.5,cex.main=2)
+   plot.trendl.pr(log(l.b.e.ttshw[[j]]+1), l.b.mpd.g[[j]],lcol="black")
+      
+   plot(log(l.b.e.ttshw[[j]]), l.b.mntd.g[[j]],ylim=c(0,1.3*max(l.b.mntd.g[[j]])),main=lf.names[j],
+           col=rgb(90,90,90,a=30,max = 255),pch=19,ylab="beta.mntd",xlab="Ln-transformed elevation distance",cex.lab=1.5,cex.axis=1.5,cex.main=2)
+   plot.trendl.pr(log(l.b.e.ttshw[[j]]+1), l.b.mntd.g[[j]],lcol="black")
+    }
+  dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/谱系-ses.mpd_mntd-海拔距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1*2/3,height=8.27/2) 
+ 
+par(mfrow=c(1,2)) 
+ses.beta.plot(l.b.e.ttshw[[1]], ses.beta.mntd.plot.999[,6],"ses.beta.mntd",term=1)
+ses.beta.plot(l.b.e.ttshw[[1]], ses.beta.mpd.plot.999[,6],"ses.beta.mpd",term=1)
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/三尺度-谱系-ses.mpd_mntd-海拔距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27) 
+
+par(mfrow=c(2,3)) 
+l.d.e
+ses.beta.plot(l.b.e.ttshw[[1]], ses.beta.mntd.plot.999[,6],"ses.beta.mntd",term=1)
+
+ses.beta.plot(l.b.e.ttshw[[1]], ses.beta.mpd.plot.999[,6],"ses.beta.mpd",term=1)
+
+dev.off()
+
+
+
+#功能alpha 气候线性和非线性拟合####
+head(xinfo.plot)
+o<-c(7,8,6,9,10,11)
+t2<-t1<-NULL
+for (i in 1:6) {  t1<-rbind(t1,rp(l.clim3[[1]][-alpha.exclude,2],l.clim32[[1]][-alpha.exclude,2],xinfo.plot[,o[i]],term=1))}
+t1#固定取[[1]]以样方为基础算
+t2<-NULL
+for (i in 1:6) {  t2<-rbind(t2,rp(l.clim3[[1]][-alpha.exclude,2],l.clim32[[1]][-alpha.exclude,2],xinfo.plot[,o[i]],term=2))}
+t2
+write.csv(data.frame(Observed_alpha_diversity=names(xinfo.plot)[o],linear_model=t1,Quadratic_model=t2),
+          file="c:/d/r/meili2/table/fd-alpha-11-12.csv")
+
+
+#功能ses alpha mfd mnfd 计算####
+
+l.ses.mfd.group<-l.ses.mnfd.group<-NULL
+
+l.ses.mfd.group[[1]]<-ses.alpha.mfd.plot
+l.ses.mnfd.group[[1]]<-ses.alpha.mnfd.plot
+
+t<-proc.time()
+for (i in 2:3) {
+ # i<-5
+ # l.ses.pd.group[[i]]<-  picante::ses.pd(  l.m01_[[i]],l.ml.tree[[i]]$scenario.3, null.model = "taxa.labels",  runs = 99)#900s
+  l.ses.mfd.group[[i]]<- picante::ses.mpd( l.m01[[i]],ml_fun_dist_mfd,null.model = "taxa.labels",abundance.weighted=F,  runs = 99)#850s
+  l.ses.mnfd.group[[i]]<-picante::ses.mntd(l.m01[[i]],ml_fun_dist_mfd,null.model = "taxa.labels",abundance.weighted=F,  runs = 99)#846s
+} #99s-178.05
+
+proc.time()-t
+#功能ses alpha mfd mnfd 画图####
+
+path<-paste("C:/D/r/meili2/jpg/ses功能多样性-分组",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*0.8,height=8.27*3/2)  
+par(mfrow=c(3,2),mar=c(4,5,5,0.5))
+for (i in 1:3) {
+  #ses.plot.g(l.ele[[i]],l.ses.pd.group[[i]],"ses.pd",mainname=lf.names[i])
+  ses.plot.g(l.ele[[i]],l.ses.mfd.group[[i]],"ses.mfd",mainname=lf.names[i])
+  ses.plot.g(l.ele[[i]],l.ses.mnfd.group[[i]],"ses.mnfd",mainname=lf.names[i])
+}
+par(mfrow=c(1,1))
+dev.off()
+
+#功能beta计算#####
+t<-proc.time()
+sp_faxes_coord_ml.t<-sp_faxes_coord_ml[,1:2]
+sp_faxes_coord_ml.t<-sp_faxes_coord_ml.t[order(rownames(sp_faxes_coord_ml.t)),]
+l.b.fd.g<-l.b.mfd.g<-l.b.mnfd.g<-NULL
+for (i in 1:3) {
+  l.b.fd.g[[i]]<-betapart:: functional.beta.pair(l.m01[[i]][-beta.exclude.row,order(names(l.m01[[i]]))],sp_faxes_coord_ml.t,index.family="sorensen")#默认index.family="sorensen"
+  l.b.mfd.g[[i]]<-picante::comdist(l.m01_[[i]],l.ml_phy_dist[[i]])
+  l.b.mnfd.g[[i]]<-picante::comdistnt(l.m01_[[i]],l.ml_phy_dist[[i]])
+}#循环一次540s
+proc.time()-t
+#功能beta 画图 海拔和气候距离####
+path<-paste("C:/D/r/meili2/jpg/功能beta-海拔气候距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27)
+
+tempplot<-function(x,y,xn="",yn="",mn="",rpoffset1=1.1){
+  plot(x,y,ylim=c(min(y),1.2*max(y)),xlab=xn,ylab=yn,main=mn,cex.lab=2,cex.main=3,cex.axis=1.5,pch=19,col="gray")
+  plot.trendl.pr(x,y,rpoffset =rpoffset1 )
+}
+par(mfrow=c(2,3),mar=c(4,5,5,0.5))
+for (i in 1:3) {
+  tempplot(log(dist(xinfo_plot[-beta.exclude.row,2])+1), l.b.fd.g[[1]][[i]],
+           xn="Ln transformed elevation distance",yn="Fucntional dissimilarity",mn=comp.names[i],rpoffset1 = 1.2)
+}
+for (i in 1:3) {
+  tempplot(dist(l.clim[[1]][-beta.exclude.row]), l.b.fd.g[[1]][[i]],
+           xn="Climate distance",yn="Fucntional dissimilarity",mn=comp.names[i],rpoffset1 = 1.2)
+}
+dev.off()
+
+path<-paste("C:/D/r/meili2/jpg/功能beta-mnfd mfd海拔气候距离",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1,height=8.27)
+
+par(mfrow=c(2,2),mar=c(4,5,5,0.5))
+tempplot(log(dist(xinfo_plot[,2])+1), l.b.mfd.g[[1]],xn="Ln transformed elevation distance",yn="mfd",rpoffset1 = 1.2) 
+tempplot(log(dist(xinfo_plot[,2])+1), l.b.mnfd.g[[1]],xn="Ln transformed elevation distance",yn="mnfd",rpoffset1 = 1.2) 
+tempplot(dist(l.clim[[1]]), l.b.mfd.g[[1]],xn="Climate distance",yn="mfd",rpoffset1 = 1.2) 
+tempplot(dist(l.clim[[1]]), l.b.mnfd.g[[1]],xn="Climate distance",yn="mnfd",rpoffset1 = 1.2)
+dev.off()
+
+
+#功能beta mantel####
+t.m01<-t.faxis<-NULL
+for (i in 1:3) {
+  t.faxis[[1]]<-sp_faxes_coord_ml[,1:2]
+  t.faxis[[1]]<-t.faxis[[1]][order(rownames(t.faxis[[1]])),]#按物种名排序
+  t.m01  [[1]]<-l.m01[[1]][-beta.exclude.row, order(names(l.m01[[1]]))]
+  
+}
+mantel.rst2<-function(listx,listy,xnames,offset=0.001){
+  #list<-betalist.comm
+  mrst<-NULL#mantel result
+  for (j in 1:3) {
+    for (i in 1:3) {
+      temp<-vegan::mantel(log(listx[[j]]+offset), listy[[j]][[i]],permutations=999,method="pearson")
+      p<-temp[[4]]
+      if (p <= 0.001) {           sig.mark <- "***"}
+      if (p <= 0.01 & p > 0.001) {sig.mark <- "**"}
+      if (p <= 0.05 & p > 0.01) { sig.mark<- "*"}
+      if (p > 0.05) {             sig.mark <- ""}
+
+      mrst<-rbind(mrst,data.frame(y=paste(lf.names[j],comp.names[i],sep="-"),x=xnames,stat=paste(round(temp[[3]],3),sig.mark)))
+
+    }
+  }
+  return(mrst) 
+}#输入betalist,提取各beta多样性之间mantel test
+
+
+m1<-vegan::mantel(log(dist(xinfo_plot[-beta.exclude.row,2])+1), l.b.fd.g[[1]][[1]],permutations=999,method="pearson") 
+m2<-vegan::mantel(log(dist(xinfo_plot[-beta.exclude.row,2])+1), l.b.fd.g[[1]][[2]],permutations=999,method="pearson") 
+m3<-vegan::mantel(log(dist(xinfo_plot[-beta.exclude.row,2])+1), l.b.fd.g[[1]][[3]],permutations=999,method="pearson") 
+m4<-vegan::mantel(dist(l.clim[[1]][-beta.exclude.row]), l.b.fd.g[[1]][[1]],permutations=999,method="pearson") 
+m5<-vegan::mantel(dist(l.clim[[1]][-beta.exclude.row]), l.b.fd.g[[1]][[2]],permutations=999,method="pearson") 
+m6<-vegan::mantel(dist(l.clim[[1]][-beta.exclude.row]), l.b.fd.g[[1]][[3]],permutations=999,method="pearson") 
+
+m7<-vegan::mantel(log(dist(xinfo_plot[,2])+1), l.b.mfd.g[[1]],permutations=999,method="pearson") 
+m8<-vegan::mantel(log(dist(xinfo_plot[,2])+1), l.b.mnfd.g[[1]],permutations=999,method="pearson") 
+m9<-vegan::mantel(dist(l.clim[[1]]), l.b.mfd.g[[1]],permutations=999,method="pearson") 
+m10<-vegan::mantel(dist(l.clim[[1]]), l.b.mnfd.g[[1]],permutations=999,method="pearson") 
+
+
+lm1<-rp(log(dist(xinfo_plot[-beta.exclude.row,2])+1), log(dist(xinfo_plot[-beta.exclude.row,2])+1), l.b.fd.g[[1]][[1]]) 
+lm2<-rp(log(dist(xinfo_plot[-beta.exclude.row,2])+1), log(dist(xinfo_plot[-beta.exclude.row,2])+1), l.b.fd.g[[1]][[2]]) 
+lm3<-rp(log(dist(xinfo_plot[-beta.exclude.row,2])+1), log(dist(xinfo_plot[-beta.exclude.row,2])+1), l.b.fd.g[[1]][[3]]) 
+lm4<-rp(dist(l.clim[[1]][-beta.exclude.row]), dist(l.clim2.g9[[1]][-beta.exclude.row]),l.b.fd.g[[1]][[1]]) 
+lm5<-rp(dist(l.clim[[1]][-beta.exclude.row]), dist(l.clim2.g9[[1]][-beta.exclude.row]),l.b.fd.g[[1]][[2]]) 
+lm6<-rp(dist(l.clim[[1]][-beta.exclude.row]), dist(l.clim2.g9[[1]][-beta.exclude.row]),l.b.fd.g[[1]][[3]]) 
+
+lm7<-rp(log(dist(xinfo_plot[,2])+1), log(dist(xinfo_plot[,2])+1), l.b.mfd.g[[1]]) 
+lm8<-rp(log(dist(xinfo_plot[,2])+1), log(dist(xinfo_plot[,2])+1), l.b.mnfd.g[[1]]) 
+lm9<-rp(dist(l.clim[[1]]), dist(l.clim2.g9[[1]]),l.b.mfd.g[[1]]) 
+lm10<-rp(dist(l.clim[[1]]), dist(l.clim2.g9[[1]]),l.b.mnfd.g[[1]]) 
+
+
+rbind(lm1,lm2,lm3,lm4,lm5,lm6,lm7,lm8,lm9,lm10)
+
+temp<-list(m1,m2,m3,m4,m5,m6,m7,m8,m9,m10)
+
+mrst<-NULL#mantel result
+for (i in 1:10) {
+  p<-temp[[i]][[4]]
+  if (p <= 0.001) {           sig.mark <- "***"}
+  if (p <= 0.01 & p > 0.001) {sig.mark <- "**"}
+  if (p <= 0.05 & p > 0.01) { sig.mark<- "*"}
+  if (p > 0.05) {             sig.mark <- ""}
+  
+  mrst<-rbind(mrst,stat=paste(round(temp[[i]][[3]],3),sig.mark))
+  }
+mrst
+
+
+
+write.csv(data.frame(mantel_test=mrst,linear_model=rbind(lm1,lm2,lm3,lm4,lm5,lm6,lm7,lm8,lm9,lm10)),file="c:/d/r/meili2/table/fd-beta-mantel-linear.csv")
+
+#按沈泽昊意见补充样方属性表0914####
+plotmeta<-unique(ml[,c(2,17,18,20)])
+pa<-read.csv("c:/d/r/meili2/pa.csv",header = T)
+head(plotmeta)
+for (i in 1:length(plotmeta[,1])) {
+  plotmeta[i,5]<-pa[pa[,1]==plotmeta[i,1],2]
+}
+dim(m01_plot_)
+plotmeta[,6]<-rowSums(m01_plot_)
+plotmeta <-
+  data.frame(
+    n = 1:159,
+    "海拔" = plotmeta[, 2],
+    "群落" = plotmeta[, 4],
+    "植被" = plotmeta[, 3],
+    "面积_m^2" = plotmeta[, 5],
+    "物种数" = plotmeta[, 6],
+    "物种密度"=plotmeta[, 6]/plotmeta[, 5]
+  )
+write.csv(plotmeta,file="c:/d/r/meili2/plotmeta.csv")
+
+
+commmeta<-data.frame("群落"=unique(plotmeta[,3]))
+for (i in 1:length(commmeta[,1])) {
+  commmeta[i,2]<-sum(plotmeta[,3]==commmeta[i,1])
+  commmeta[i,3]<-sum(plotmeta[plotmeta[,3]==commmeta[i,1],5])
+  commmeta[i,4]<-min(plotmeta[plotmeta[,3]==commmeta[i,1],2])
+  commmeta[i,5]<-max(plotmeta[plotmeta[,3]==commmeta[i,1],2])
+}
+commmeta[,6]<-rowSums(m01_comm)
+names(commmeta)[2:6]<-c("样方数","总面积","海拔下限","海拔上限","物种数")
+head(commmeta)
+
+vegemeta<-data.frame("植被"=unique(plotmeta[,4]))
+for (i in 1:length(vegemeta[,1])) {
+  vegemeta[i,2]<-sum(plotmeta[,4]==vegemeta[i,1])
+  vegemeta[i,3]<-sum(unique(plotmeta[,3:4])[,2]==vegemeta[i,1])
+  vegemeta[i,4]<-sum(plotmeta[plotmeta[,4]==vegemeta[i,1],5])
+  vegemeta[i,5]<-min(plotmeta[plotmeta[,4]==vegemeta[i,1],2])
+  vegemeta[i,6]<-max(plotmeta[plotmeta[,4]==vegemeta[i,1],2])
+}
+vegemeta[,7]<-rowSums(m01_vege)
+names(vegemeta)[2:7]<-c("样方数","群落数","总面积","海拔下限","海拔上限","物种数")
+vegemeta
+sum(vegemeta[,3])
+
+write.csv(plotmeta,file="c:/d/r/meili2/plotmeta.csv")
+write.csv(commmeta,file="c:/d/r/meili2/commmeta.csv")
+write.csv(vegemeta,file="c:/d/r/meili2/vegemeta.csv")
+
+
+my_data <- data.frame( 
+  group = rep(c("beta.pd.comm.total", "beta.fd.comm.total"), each = length(b.pd.pcv[[2]][[3]])),
+  obs.beta = c(dtc(b.pd.pcv[[2]][[3]]),  dtc(b.fd.pcv[[2]][[3]]))
+)
+wilcox.test(obs.beta ~ group,
+            data = data.frame(
+              group = rep(c("beta.sr.comm.total", "beta.fd.comm.total"),  each = length(b.sr.pcv[[2]][[2]])),
+              obs.beta = c(dtc(b.sr.pcv[[2]][[2]]),  dtc(b.fd.pcv[[2]][[2]]))),
+            var.equal = TRUE, 
+            alternative = "greater"#less,greater，后者变量显著比前者小/大
+            )
+
+
+path<-paste("C:/D/r/meili2/jpg/系统树",Sys.Date(),".pdf",sep="_")
+pdf(path,width=11.69*1.1*2/3,height=8.27)
+plot(ml.tree$scenario.3,cex=0.1)
+dev.off()
+
+l.area3<-NULL#三尺度的alpha多样性的面积自变量
+l.area3[[1]]<-plotmeta[,c(1,5)]
+
+l.area3[[2]]<-commmeta[,c(1,3)]
+l.area3[[3]]<-vegemeta[,c(1,4)]
+names(l.area3[[2]])<-c("comm","area")
+names(l.area3[[3]])<-c("vege","area")
+
+l.b.area3<-NULL#三尺度的beta多样性的面积自变量
+l.b.area3[[1]]<-dist(l.area3[[1]])
+
+l.b.area3[[2]]<-dist(l.area3[[2]])
+l.b.area3[[3]]<-dist(l.area3[[3]])
+
+plotmeta<-read.csv(file="c:/d/r/meili2/table/plotmeta.csv",header = T,row.names = 1)
+commmeta<-read.csv(file="c:/d/r/meili2/table/commmeta.csv",header = T,row.names = 1)
+vegemeta<-read.csv(file="c:/d/r/meili2/table/vegemeta.csv",header = T,row.names = 1)
+
+dim(vegemeta)
+head(plotmeta)
+for (i in 1:length(plotmeta[,1])) {  plotmeta[i,8]<-     climcomp1[climcomp1[,1]==plotmeta[i,2],2]}
+for (i in 1:length(commmeta[,1])) {  commmeta[i,7]<-mean(climcomp1[climcomp1[,1]>=commmeta[i,4]&climcomp1[,1]<=commmeta[i,5],2])}
+for (i in 1:length(vegemeta[,1])) {  vegemeta[i,8]<-mean(climcomp1[climcomp1[,1]>=vegemeta[i,5]&climcomp1[,1]<=vegemeta[i,6],2])}
+
+for (i in 1:length(plotmeta[,1])) {  plotmeta[i,9]<-     climcomp2[climcomp2[,1]==plotmeta[i,2],2]}
+for (i in 1:length(commmeta[,1])) {  commmeta[i,8]<-mean(climcomp2[climcomp2[,1]>=commmeta[i,4]&climcomp2[,1]<=commmeta[i,5],2])}
+for (i in 1:length(vegemeta[,1])) {  vegemeta[i,9]<-mean(climcomp2[climcomp2[,1]>=vegemeta[i,5]&climcomp2[,1]<=vegemeta[i,6],2])}
+
+l.clim3<-NULL#三尺度的alpha多样性的气候自变量
+l.clim3[[1]]<-plotmeta[,c(1,8)]
+l.clim3[[2]]<-commmeta[,c(1,7)]
+l.clim3[[3]]<-vegemeta[,c(1,8)]
+names(l.clim3[[1]])<-c("plot","clim")
+names(l.clim3[[2]])<-c("comm","clim")
+names(l.clim3[[3]])<-c("vege","clim")
+
+l.b.clim3<-NULL#三尺度的beta多样性的气候自变量
+l.b.clim3[[1]]<-dist(l.clim3[[1]])
+l.b.clim3[[2]]<-dist(l.clim3[[2]])
+l.b.clim3[[3]]<-dist(l.clim3[[3]])
+
+l.clim32<-NULL#三尺度的alpha多样性的气候自变量主成分1
+l.clim32[[1]]<-plotmeta[,c(1,9)]
+l.clim32[[2]]<-commmeta[,c(1,8)]
+l.clim32[[3]]<-vegemeta[,c(1,9)]
+names(l.clim32[[1]])<-c("plot","clim")
+names(l.clim32[[2]])<-c("comm","clim")
+names(l.clim32[[3]])<-c("vege","clim")
+
+l.b.clim32<-NULL#三尺度的beta多样性的气候自变量主成分2
+l.b.clim32[[1]]<-dist(l.clim32[[1]])
+l.b.clim32[[2]]<-dist(l.clim32[[2]])
+l.b.clim32[[3]]<-dist(l.clim32[[3]])
+
+
+l.ele3<-NULL#三尺度的alpha多样性的海拔自变量
+l.ele3[[2]]<-(commmeta[,5]+commmeta[,4])/2
+l.ele3[[3]]<-(vegemeta[,5]+vegemeta[,6])/2
+names(l.ele3[[2]])<-c("comm","ele")
+names(l.ele3[[3]])<-c("vege","ele")
+
+l.b.ele3<-NULL#三尺度的beta多样性的海拔自变量
+l.b.ele3[[2]]<-dist(l.ele3[[2]])
+l.b.ele3[[3]]<-dist(l.ele3[[3]])
+par(mfrow=c(1,3))
+for (i in 1:3) {
+ plot(b.sr.pcv[[1]][[i]],b.pd.pcv[[1]][[i]],main=comp.names[i],xlim=c(0,1),ylim=c(0,1))
+ abline(0,1)
+}
